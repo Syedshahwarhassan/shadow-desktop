@@ -1,0 +1,287 @@
+/* AntiGravity Web HUD — visual layer */
+
+:root {
+  --accent: #00D4FF;
+  --bg: #060912;
+  --bg-2: #0b1224;
+  --panel: rgba(14, 22, 40, 0.72);
+  --panel-border: rgba(0, 212, 255, 0.18);
+  --text: #d8e7ff;
+  --muted: #7e8aa3;
+  --user: #6ee7ff;
+  --bot: #c9b6ff;
+  --danger: #ff5577;
+}
+
+[data-theme="light"] {
+  --bg: #f3f7ff;
+  --bg-2: #e7eefb;
+  --panel: rgba(255, 255, 255, 0.85);
+  --panel-border: rgba(0, 90, 160, 0.18);
+  --text: #0a1422;
+  --muted: #5b6a82;
+  --user: #006b8a;
+  --bot: #5230a6;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(1000px 600px at 20% 0%, rgba(0,212,255,0.08), transparent 60%),
+    radial-gradient(900px 700px at 100% 100%, rgba(168,85,247,0.10), transparent 60%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  background-attachment: fixed;
+  overflow: hidden;
+}
+
+/* ───── topbar ─────────────────────────────────────────────────────────── */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, rgba(0,0,0,0.4), rgba(0,0,0,0));
+  backdrop-filter: blur(8px);
+  z-index: 5;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent), 0 0 30px var(--accent);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.brand-name { font-weight: 700; letter-spacing: 1.5px; }
+.brand-tag {
+  font-size: 11px; color: var(--muted);
+  border: 1px solid var(--panel-border);
+  padding: 2px 8px; border-radius: 999px;
+  margin-left: 6px;
+}
+.topbar-actions { display: flex; gap: 8px; }
+.icon-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--panel-border);
+  padding: 8px 12px; border-radius: 10px;
+  cursor: pointer; font-size: 13px;
+  transition: transform .12s ease, border-color .2s, background .2s;
+}
+.icon-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+.icon-btn .icon { font-size: 14px; }
+.icon-btn.active { border-color: var(--accent); box-shadow: 0 0 18px rgba(0,212,255,0.25); }
+
+/* ───── stage layout ──────────────────────────────────────────────────── */
+.stage {
+  position: absolute; top: 56px; bottom: 36px; left: 0; right: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  gap: 14px; padding: 14px;
+}
+@media (max-width: 1100px) {
+  .stage { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; overflow-y: auto; }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  padding: 14px;
+  backdrop-filter: blur(10px);
+  overflow-y: auto;
+}
+.panel-head { display: flex; justify-content: space-between; align-items: center; }
+.panel-title {
+  font-size: 12px; letter-spacing: 2px; color: var(--muted);
+  margin: 6px 0 10px; text-transform: uppercase;
+}
+
+/* ───── stats ─────────────────────────────────────────────────────────── */
+.stat { margin-bottom: 12px; }
+.stat-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; letter-spacing: 1.5px; }
+.stat-val { font-size: 12px; color: var(--text); margin-top: 4px; text-align: right; font-variant-numeric: tabular-nums; }
+.bar {
+  height: 8px; background: rgba(255,255,255,0.06);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px; overflow: hidden;
+}
+.bar-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--accent), #a855f7);
+  box-shadow: 0 0 10px var(--accent);
+  transition: width .6s ease;
+}
+.clock {
+  margin: 16px 0 4px; padding: 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  text-align: center;
+}
+.clock .time { font-size: 26px; font-weight: 700; letter-spacing: 2px; color: var(--accent); }
+.clock .date { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+.notes {
+  list-style: none; padding: 0; margin: 0 0 10px;
+  max-height: 180px; overflow-y: auto;
+}
+.notes li {
+  font-size: 12px; padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px; margin-bottom: 6px;
+  background: rgba(255,255,255,0.02);
+}
+.notes li.empty { color: var(--muted); font-style: italic; text-align: center; }
+.ghost-btn {
+  width: 100%;
+  background: transparent; color: var(--muted);
+  border: 1px dashed var(--panel-border);
+  padding: 8px; border-radius: 8px; cursor: pointer; font-size: 12px;
+}
+.ghost-btn:hover { color: var(--accent); border-color: var(--accent); }
+.ghost-btn.small { width: auto; padding: 4px 10px; font-size: 11px; }
+
+/* ───── HUD ───────────────────────────────────────────────────────────── */
+.hud-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start;
+  gap: 18px; padding-top: 6px; min-height: 0;
+}
+.hud {
+  position: relative;
+  width: min(440px, 60vmin);
+  aspect-ratio: 1 / 1;
+  display: grid; place-items: center;
+}
+.hud-svg { width: 100%; height: 100%; overflow: visible; }
+.hud-center {
+  position: absolute; inset: 0;
+  display: grid; place-items: center; text-align: center;
+  pointer-events: none;
+}
+.status {
+  font-size: 18px; letter-spacing: 6px; font-weight: 700;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(0,212,255,0.6);
+}
+.hint { font-size: 11px; color: var(--muted); margin-top: 6px; letter-spacing: 1.5px; }
+
+/* Ring rotations */
+.ring-outer { transform-origin: 200px 200px; animation: spin 40s linear infinite; }
+.ring-mid   { transform-origin: 200px 200px; animation: spinrev 18s linear infinite; }
+.ring-inner { transform-origin: 200px 200px; animation: spin 26s linear infinite; }
+
+#core { transition: opacity .3s ease, transform .3s ease; transform-origin: 200px 200px; }
+
+/* state: listening */
+.hud[data-state="listening"] .status { color: #6ee7ff; text-shadow: 0 0 22px #6ee7ff; }
+.hud[data-state="listening"] #core   { animation: corePulse 1.2s ease-in-out infinite; }
+.hud[data-state="listening"] .ring-mid { animation-duration: 7s; }
+
+/* state: speaking */
+.hud[data-state="speaking"] .status { color: #c9b6ff; text-shadow: 0 0 22px #c9b6ff; }
+.hud[data-state="speaking"] #core   { animation: coreBeat 0.55s ease-in-out infinite; }
+.hud[data-state="speaking"] .ring-mid { animation-duration: 4s; }
+.hud[data-state="speaking"] #waveRing {
+  stroke-opacity: 0.85;
+  animation: waveOut 1.4s ease-out infinite;
+}
+
+/* ───── prompt + chips ────────────────────────────────────────────────── */
+.prompt-row {
+  width: min(560px, 92%);
+  display: flex; gap: 8px;
+}
+#textInput {
+  flex: 1; min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  padding: 12px 14px; border-radius: 12px;
+  font-size: 14px; outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+#textInput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,212,255,0.15); }
+.primary-btn {
+  background: linear-gradient(135deg, var(--accent), #a855f7);
+  color: #000; font-weight: 700;
+  border: 0; padding: 0 18px; border-radius: 12px;
+  cursor: pointer; letter-spacing: 1px;
+}
+.primary-btn:hover { filter: brightness(1.1); }
+.quick { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 600px; }
+.chip {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--panel-border);
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 12px; cursor: pointer;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.chip:hover { color: var(--accent); border-color: var(--accent); background: rgba(0,212,255,0.06); }
+
+/* ───── chat ──────────────────────────────────────────────────────────── */
+.chat {
+  display: flex; flex-direction: column; gap: 8px;
+  padding-top: 4px;
+  font-size: 13px;
+}
+.msg {
+  padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  max-width: 100%; word-wrap: break-word;
+  white-space: pre-wrap;
+}
+.msg .who { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); margin-bottom: 4px; }
+.msg.user .who { color: var(--user); }
+.msg.assistant .who { color: var(--bot); }
+.msg.user { background: rgba(110, 231, 255, 0.06); }
+.msg.assistant { background: rgba(201, 182, 255, 0.06); }
+.msg.empty { color: var(--muted); font-style: italic; text-align: center; border-style: dashed; }
+
+/* ───── bottom bar ────────────────────────────────────────────────────── */
+.bottombar {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 36px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 14px; font-size: 11px;
+  border-top: 1px solid var(--panel-border);
+  background: rgba(0,0,0,0.3);
+  backdrop-filter: blur(8px);
+}
+.status-pill {
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  color: var(--muted); letter-spacing: 1px;
+}
+.status-pill.subtle { margin-left: auto; }
+.status-pill kbd {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px; padding: 1px 6px;
+  font-family: inherit; font-size: 10px;
+}
+
+/* ───── animations ────────────────────────────────────────────────────── */
+@keyframes spin     { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes spinrev  { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
+@keyframes pulse    { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+@keyframes corePulse{
+  0%, 100% { transform: scale(1); opacity: 0.95; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+@keyframes coreBeat {
+  0%, 100% { transform: scale(0.96); opacity: 0.85; }
+  50%      { transform: scale(1.12); opacity: 1; }
+}
+@keyframes waveOut {
+  0%   { r: 92;  stroke-opacity: 0.9; }
+  100% { r: 165; stroke-opacity: 0;   }
+}
+
+/* scrollbars */
+.panel::-webkit-scrollbar, .notes::-webkit-scrollbar { width: 6px; }
+.panel::-webkit-scrollbar-thumb, .notes::-webkit-scrollbar-thumb {
+  background: var(--panel-border); border-radius: 3px;
+}
