@@ -233,7 +233,7 @@ class CommandDispatcher:
                 return MediaCommands.play_on_youtube(song)
 
         # ── Typing & Dictation ────────────────────────────────────────────────
-        if any(k in text for k in ["dictation on", "start typing", "likhna shuru karo", "type karna shuru karo", "لکھنا شروع کرو"]):
+        if any(k in text for k in ["dictation on", "start typing", "typing start", "likhna shuru karo", "type karna shuru karo", "لکھنا شروع کرو"]):
             return DictationMode.turn_on()
 
         if any(k in text for k in ["dictation off", "stop typing", "likhna band karo", "type karna band karo", "لکھنا بند کرو"]):
@@ -290,13 +290,29 @@ class CommandDispatcher:
 
                 return SystemCommands.open_app(app)
 
+        # ── Desktop File/Folder Creation ──────────────────────────────────────
+        if any(k in text for k in ["create folder", "make folder", "folder banao", "folder bana do", "folder create"]):
+            name = re.sub(r"(please|create folder|make folder|folder banao|folder bana do|folder create|named|called|naam ka|ko)", "", text).strip()
+            if not name:
+                name = "New Folder"
+            return DesktopCommands.create_folder(name)
+
+        if any(k in text for k in ["create file", "make file", "file banao", "file bana do", "file create"]):
+            name = re.sub(r"(please|create file|make file|file banao|file bana do|file create|named|called|naam ki|ko)", "", text).strip()
+            if not name:
+                name = "New File"
+            return DesktopCommands.create_file(name)
+
         # ── Screenshot ────────────────────────────────────────────────────────
         if "screenshot" in text:
             return DesktopCommands.screenshot()
 
         # ── Note ──────────────────────────────────────────────────────────────
         if "note" in text:
-            note = re.sub(r"(take note|note down|note likho|note karo|note)", "", text).strip()
+            note = re.sub(r"(take notes|take note|note down|note likho|note karo|note)", "", text).strip()
+            # If the user just says "s" from "take notes", ignore it
+            if note == "s" and text == "take notes":
+                note = ""
             if note:
                 return DesktopCommands.take_note(note)
             return "Kya note karna hai?"

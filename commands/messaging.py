@@ -32,33 +32,33 @@ class MessagingCommands:
             # 1. Open WhatsApp Windows App
             os.system('start whatsapp:')
             
-            # 2. Wait for it to open and focus (Reduced from 4s)
-            time.sleep(1.5)
+            # 2. Wait for it to open and focus
+            time.sleep(3.0)
             
             # 3. Press Ctrl+F to focus the search bar
             pyautogui.hotkey('ctrl', 'f')
-            time.sleep(0.5)
+            time.sleep(1.0)
             
             # Clear any existing text in the search bar
             pyautogui.hotkey('ctrl', 'a')
             pyautogui.press('backspace')
-            time.sleep(0.2)
+            time.sleep(0.5)
             
             # 4. Type the contact name
             pyautogui.write(contact_name)
-            time.sleep(0.8) # Wait for search results (Reduced from 2s)
+            time.sleep(1.5) # Wait for search results
             
             # 5. Press Down Arrow then Enter to select the top result
             pyautogui.press('down')
-            time.sleep(0.2)
+            time.sleep(0.5)
             pyautogui.press('enter')
             
-            # 6. Wait for chat to open (Reduced from 1s)
-            time.sleep(0.5)
+            # 6. Wait for chat to open
+            time.sleep(1.0)
             
             # 7. Type the message
             pyautogui.write(message)
-            time.sleep(0.2)
+            time.sleep(0.5)
             
             # 8. Press Enter to send
             pyautogui.press('enter')
@@ -99,8 +99,8 @@ class MessagingCommands:
         # "ماما کو واٹس ایپ کرو میں آ رہا ہوں"
 
         patterns_ur = [
-            r"(\w+)\s+ko\s+whatsapp\s+(?:karo\s+|bhejo\s+)?(.+)",
-            r"whatsapp\s+(?:karo\s+|bhejo\s+)?(\w+)\s+ko\s+(.+)",
+            r"(\w+)\s+ko\s+whatsapp\s+(?:par\s+|per\s+)?(?:message\s+)?(?:karo\s+|bhejo\s+)?(.+)",
+            r"whatsapp\s+(?:par\s+|per\s+)?(?:message\s+)?(?:karo\s+|bhejo\s+)?(\w+)\s+ko\s+(.+)",
             r"(\w+)\s+ko\s+message\s+(?:karo\s+|bhejo\s+)?(.+)",
             r"message\s+(?:karo\s+|bhejo\s+)?(\w+)\s+ko\s+(.+)",
             r"([\w\u0600-\u06FF]+)\s+کو\s+واٹس ایپ\s+(?:کرو\s+|بھیجو\s+)?(.+)",

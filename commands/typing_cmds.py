@@ -32,7 +32,7 @@ pyautogui.PAUSE = 0.03  # small delay between key actions
 class TypingCommands:
 
     @staticmethod
-    def type_text(text: str) -> str:
+    def type_text(text: str, silent: bool = False) -> str:
         """
         Type text at the current cursor position.
         Uses clipboard (copy+paste) for full Unicode support including Urdu.
@@ -60,11 +60,11 @@ class TypingCommands:
                 pass
 
             print(f"[TYPE] Typed: {text}")
-            return f"Typed: {text}"
+            return "" if silent else f"Typed: {text}"
 
         except Exception as e:
             print(f"[TYPE] Error: {e}")
-            return f"Could not type text. Error: {str(e)}"
+            return "" if silent else f"Could not type text. Error: {str(e)}"
 
     @staticmethod
     def press_key(key: str) -> str:
@@ -149,4 +149,5 @@ class DictationMode:
     @classmethod
     def handle(cls, text: str) -> str:
         """Type the spoken text if dictation mode is active."""
-        return TypingCommands.type_text(text)
+        # Add a space at the end to naturally separate consecutive dictated phrases
+        return TypingCommands.type_text(text + " ", silent=True)

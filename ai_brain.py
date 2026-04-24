@@ -24,12 +24,7 @@ class AIBrain:
 
         # Use a more reliable free model ID for OpenRouter
         # gemini-2.0-flash-lite is often restricted or renamed
-        self.default_model = "openai/gpt-5.3-chat"
-
-        # Tiny per-prompt TTL cache — repeated identical questions return
-        # instantly without paying for another round trip.
-        self._cache: dict[str, tuple[float, str]] = {}
-        self._cache_ttl = 300  # 5 minutes
+        self.default_model = "openai/gpt-5.3-chat" 
 
         try:
             from openai import OpenAI
@@ -128,6 +123,49 @@ class AIBrain:
                 self.model = "openai/gpt-3.5-turbo"
                 return self.get_response(prompt)
             return "I am having trouble connecting to my AI core."
+
+    def generate_code(self, prompt):
+        """Generates raw code from a prompt, strictly formatted as markdown blocks."""
+        if not self.openrouter_key and not self.openai_key:
+            print("[AI] No API key configured for code generation.")
+            return None
+
+        try:
+            system_msg = (
+                "You are an expert software developer. "
+                "The user will give you a request to write code. "
+                "You MUST return ONLY the requested code. "
+                "Enclose the code in markdown code blocks. "
+                "If the project requires multiple files, precede each code block with the filename enclosed in backticks, "
+                "for example: `index.html`\\n```html\\n...\\n```\\n"
+                "Do not include any explanations, greetings, or conversational text. ONLY output the filenames and code blocks."
+            )
+            
+            if not self.is_legacy and self.client:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=4000
+                )
+                return response.choices[0].message.content.strip()
+            else:
+                import openai
+                response = openai.ChatCompletion.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=4000
+                )
+                return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"[AI] Code Gen Error: {e}")
+            return None
 
 # Singleton
 ai_brain = AIBrain()

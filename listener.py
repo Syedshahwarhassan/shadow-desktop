@@ -60,6 +60,21 @@ class Listener:
 
             wake_word = config_manager.get("wake_word", "shadow").lower()
             
+            # If DictationMode is active, bypass wake word requirement
+            from commands.typing_cmds import DictationMode
+            if DictationMode.is_active():
+                # We can strip the wake word if they accidentally said it while dictating
+                clean_text = raw_text
+                matched_wake = self._find_wake(text_en, text_ur, wake_word)
+                if matched_wake:
+                    parts = matched_wake.split(wake_word, 1)
+                    clean_text = parts[1].strip() if len(parts) > 1 else clean_text
+                
+                if clean_text:
+                    print(f"[STT DICTATION] Heard: {clean_text}")
+                    self.callback(clean_text)
+                continue
+
             matched_wake = self._find_wake(text_en, text_ur, wake_word)
 
             if matched_wake:
