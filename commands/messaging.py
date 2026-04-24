@@ -63,11 +63,11 @@ class MessagingCommands:
             # 8. Press Enter to send
             pyautogui.press('enter')
             
-            return f"WhatsApp message sent to {contact_name}: '{message}'"
+            return f"{contact_name} ko WhatsApp message bhej diya gaya hai: '{message}'"
 
         except Exception as e:
             print(f"[WHATSAPP] Error: {e}")
-            return f"Failed to send WhatsApp to {contact_name}. Error: {str(e)}"
+            return f"{contact_name} ko message bhejte hue masla aagaya. Error: {str(e)}"
 
     @staticmethod
     def parse_whatsapp_command(text: str):
@@ -94,18 +94,24 @@ class MessagingCommands:
             r"text\s+(\w+)\s+(.+)",
         ]
 
-        # ── Urdu patterns (romanized) ─────────────────────────────────────────
+        # ── Urdu patterns (romanized and Arabic script) ────────────────────────
         # "Ahmed ko WhatsApp karo hello bhai"
-        # "WhatsApp karo Ahmed ko main aa raha hoon"
-        # "Ahmed ko message karo"
+        # "ماما کو واٹس ایپ کرو میں آ رہا ہوں"
 
         patterns_ur = [
-            r"(\w+)\s+ko\s+whatsapp\s+(?:karo\s+)?(.+)",
-            r"whatsapp\s+(?:karo\s+)?(\w+)\s+ko\s+(.+)",
-            r"(\w+)\s+ko\s+message\s+(?:karo\s+)?(.+)",
+            r"(\w+)\s+ko\s+whatsapp\s+(?:karo\s+|bhejo\s+)?(.+)",
+            r"whatsapp\s+(?:karo\s+|bhejo\s+)?(\w+)\s+ko\s+(.+)",
+            r"(\w+)\s+ko\s+message\s+(?:karo\s+|bhejo\s+)?(.+)",
+            r"message\s+(?:karo\s+|bhejo\s+)?(\w+)\s+ko\s+(.+)",
+            r"([\w\u0600-\u06FF]+)\s+کو\s+واٹس ایپ\s+(?:کرو\s+|بھیجو\s+)?(.+)",
+            r"واٹس ایپ\s+(?:کرو\s+|بھیجو\s+)?([\w\u0600-\u06FF]+)\s+کو\s+(.+)",
+            r"([\w\u0600-\u06FF]+)\s+کو\s+میسج\s+(?:کرو\s+|بھیجو\s+)?(.+)",
+            r"میسج\s+(?:کرو\s+|بھیجو\s+)?([\w\u0600-\u06FF]+)\s+کو\s+(.+)",
         ]
 
-        for pattern in patterns_en + patterns_ur:
+        # Evaluate Urdu patterns first since they are more specific (e.g., contains 'ko', 'karo')
+        # This prevents generic English patterns from matching parts of an Urdu sentence.
+        for pattern in patterns_ur + patterns_en:
             match = re.search(pattern, text)
             if match:
                 contact = match.group(1).strip()

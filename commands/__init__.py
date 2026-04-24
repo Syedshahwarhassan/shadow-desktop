@@ -12,7 +12,7 @@ from ai_brain import ai_brain
 # ── Urdu → English keyword map ───────────────────────────────────────────────
 # Handles STT variations: mazak / maza / majak / مذاق → joke
 URDU_MAP = {
-    # Open / Launch  (put AFTER the app name, so "spotify kholo" → "open spotify")
+    # Open / Launch
     "kholo":        "open",
     "kholna":       "open",
     "khol do":      "open",
@@ -20,9 +20,14 @@ URDU_MAP = {
     "chalaao":      "open",
     "chalao":       "open",
     "launch karo":  "open",
+    "کھولو":         "open",
+    "چلاؤ":          "open",
+    "کھول دو":       "open",
     # Close
     "band karo":    "close",
     "band":         "close",
+    "بند کرو":       "close",
+    "بند":          "close",
     # Volume
     "awaaz":        "volume",
     "awaaz barhaao":"volume up",
@@ -78,13 +83,26 @@ URDU_MAP = {
     # Note
     "note likho":   "take note",
     "note karo":    "take note",
+    "نوٹ لکھو":      "take note",
     # Time
     "waqt":         "time",
     "waqt batao":   "what time is it",
     "time batao":   "what time is it",
+    "وقت بتاؤ":      "what time is it",
+    "کیا ٹائم":      "what time is it",
     # Quote / motivation
     "aqwal":        "quote",
     "motivation":   "quote",
+    "اقوال":         "quote",
+    # Dictation/Typing
+    "likhna shuru karo": "dictation on",
+    "لکھنا شروع کرو":    "dictation on",
+    "likhna band karo":  "dictation off",
+    "لکھنا بند کرو":     "dictation off",
+    "ٹائپ کرو":          "type",
+    # WhatsApp
+    "واٹس ایپ":      "whatsapp",
+    "میسج بھیجو":    "message bhejo",
     # Git (common mishears)
     "gift status":  "git status",
     "gaming kids status": "git status",
@@ -178,7 +196,7 @@ class CommandDispatcher:
             
         # Handle 'close' or 'stop' generally
         if any(k in text for k in ["close", "stop", "band karo"]):
-            return "Operations paused. Standing by."
+            return "Kaam rok diya gaya hai."
 
         # ── Media & Navigation ────────────────────────────────────────────────
         if "scroll" in text:
@@ -200,17 +218,17 @@ class CommandDispatcher:
                 return MediaCommands.play_on_youtube(song)
 
         # ── Typing & Dictation ────────────────────────────────────────────────
-        if any(k in text for k in ["dictation on", "start typing", "likhna shuru karo"]):
+        if any(k in text for k in ["dictation on", "start typing", "likhna shuru karo", "type karna shuru karo", "لکھنا شروع کرو"]):
             return DictationMode.turn_on()
 
-        if any(k in text for k in ["dictation off", "stop typing", "likhna band karo"]):
+        if any(k in text for k in ["dictation off", "stop typing", "likhna band karo", "type karna band karo", "لکھنا بند کرو"]):
             return DictationMode.turn_off()
 
-        if text.startswith("type"):
-            to_type = text.replace("type", "", 1).replace("karo", "", 1).strip()
+        if text.startswith("type") or text.startswith("ٹائپ"):
+            to_type = text.replace("type", "", 1).replace("karo", "", 1).replace("ٹائپ کرو", "", 1).replace("ٹائپ", "", 1).strip()
             if to_type:
                 return TypingCommands.type_text(to_type)
-            return "What should I type?"
+            return "Bataiye kya type karna hai?"
 
         # -- Keyboard Keys & Shortcuts --
         if text.startswith("press"):
@@ -266,19 +284,19 @@ class CommandDispatcher:
             note = re.sub(r"(take note|note down|note likho|note karo|note)", "", text).strip()
             if note:
                 return DesktopCommands.take_note(note)
-            return "What would you like to note down?"
+            return "Kya note karna hai?"
 
         # ── Time ──────────────────────────────────────────────────────────────
-        if any(k in text for k in ["time", "clock", "what time"]):
+        if any(k in text for k in ["time", "clock", "what time", "waqt batao", "time batao"]):
             import time as _t
-            return f"The time is {_t.strftime('%I:%M %p')}."
+            return f"Abhi waqt hai {_t.strftime('%I:%M %p')}."
 
         # ── Joke ──────────────────────────────────────────────────────────────
         if any(k in text for k in ["joke", "funny", "laugh", "latifa"]):
             return ProductivityCommands.tell_joke()
 
         # ── Weather ───────────────────────────────────────────────────────────
-        if "weather" in text:
+        if "weather" in text or "mausam" in text:
             city = text.split("in")[-1].strip() if " in " in text else "Lahore"
             return ProductivityCommands.get_weather(city)
 
@@ -297,8 +315,8 @@ class CommandDispatcher:
             return DesktopCommands.empty_trash()
 
         # ── Search ────────────────────────────────────────────────────────────
-        if any(k in text for k in ["search", "find", "google"]):
-            query = re.sub(r"(search for|search on google|search|find|google)", "", text).strip()
+        if any(k in text for k in ["search", "find", "google", "talash karo", "dhundho"]):
+            query = re.sub(r"(search for|search on google|search|find|google|talash karo|dhundho)", "", text).strip()
             return WebCommands.search_google(query)
 
         # ── Play ──────────────────────────────────────────────────────────────
@@ -313,15 +331,14 @@ class CommandDispatcher:
         # ── WhatsApp Messaging ─────────────────────────────────────────────────
         # Triggers: "whatsapp", "send message", "message X", "X ko whatsapp"
         if any(k in text for k in ["whatsapp", "send message", "send whatsapp",
-                                    "ko whatsapp", "ko message", "text message"]):
+                                    "ko whatsapp", "ko message", "text message", "message bhejo", "whatsapp bhejo", "message "]):
             contact, message = MessagingCommands.parse_whatsapp_command(raw_text)
             if contact and message:
                 return MessagingCommands.send_whatsapp(contact, message)
             elif contact and not message:
-                return f"What message should I send to {contact}?"
+                return f"{contact} ko kya message bhejun?"
             else:
-                return ("Please say: 'send WhatsApp to [name] [message]' or "
-                        "'[name] ko WhatsApp karo [message]'")
+                return ("Bataiye: '[naam] ko WhatsApp karo [message]'")
 
         if any(k in text for k in ["list contacts", "my contacts", "contacts list",
                                     "contacts batao", "contacts dikhao"]):
