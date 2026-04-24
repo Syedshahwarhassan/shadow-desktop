@@ -23,17 +23,4 @@ speedtest-cli
 wmi
 sympy
 vosk
-flask
-openai
-psutil
-pyjokes
-requests
-sympy
-wikipedia
-flask
-openai
-psutil
-pyjokes
-requests
-sympy
 wikipedia

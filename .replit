@@ -6,3 +6,26 @@ stack = "BEST_EFFORT_FALLBACK"
 [nix]
 channel = "stable-25_05"
 packages = ["espeak-ng", "freetype", "glibcLocales", "gobject-introspection", "gtk3", "lcms2", "libayatana-appindicator", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "portaudio", "scrot", "tcl", "tk", "xvfb-run", "zlib"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Feature Demo"
+
+[[workflows.workflow]]
+name = "Feature Demo"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = ".pythonlibs/bin/python feature_demo.py"
+
+[workflows.workflow.metadata]
+outputType = "console"

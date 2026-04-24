@@ -7,6 +7,16 @@ from .dev_cmds import DevCommands
 from .messaging import MessagingCommands
 from .typing_cmds import TypingCommands, DictationMode
 from .media_cmds import MediaCommands
+from .extra_cmds import (
+    WikipediaCommands,
+    CalculatorCommands,
+    CurrencyCommands,
+    UnitCommands,
+    PasswordCommands,
+    TimerCommands,
+    FunCommands,
+    NewsCommands,
+)
 from ai_brain import ai_brain
 
 # ── Urdu → English keyword map ───────────────────────────────────────────────
@@ -343,6 +353,74 @@ class CommandDispatcher:
         if any(k in text for k in ["list contacts", "my contacts", "contacts list",
                                     "contacts batao", "contacts dikhao"]):
             return MessagingCommands.list_contacts()
+
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW FEATURES (extra_cmds) — cross-platform
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Wikipedia ────────────────────────────────────────────────────────
+        if text.startswith(("wiki ", "wikipedia ")):
+            q = re.sub(r"^(wiki|wikipedia)\s+", "", text).strip("?. ")
+            return WikipediaCommands.summary(q)
+        if text.startswith("tell me about ") or text.startswith("who is ") or text.startswith("what is "):
+            q = re.sub(r"^(tell me about|who is|what is)\s+", "", text).strip("?. ")
+            # If it looks like a math expression, defer to calculator below
+            if not re.search(r"\d\s*[\+\-\*/x^]\s*\d", q):
+                return WikipediaCommands.summary(q)
+
+        # ── Currency conversion (BEFORE unit conversion — currencies are 3-letter codes) ──
+        currency_resp = CurrencyCommands.parse_and_convert(text)
+        if currency_resp and any(c in text.upper() for c in
+                                 ["USD", "EUR", "GBP", "PKR", "INR", "JPY", "CAD", "AUD", "CNY"]):
+            return currency_resp
+
+        # ── Unit conversion ──────────────────────────────────────────────────
+        if "convert" in text or re.search(r"\d+\s*[a-z]+\s+(?:to|in|into)\s+[a-z]+", text):
+            unit_resp = UnitCommands.parse_and_convert(text)
+            if unit_resp and "failed" not in unit_resp:
+                return unit_resp
+
+        # ── Calculator ───────────────────────────────────────────────────────
+        if (text.startswith(("calculate", "calc ", "compute ", "what is "))
+                or re.search(r"\d\s*[\+\-\*/x^]\s*\d", text)):
+            expr = re.sub(r"^(calculate|calc|compute|what is)\s+", "", text).strip("?. ")
+            return CalculatorCommands.evaluate(expr)
+
+        # ── Password generator ───────────────────────────────────────────────
+        if "generate password" in text or "create password" in text or "new password" in text:
+            m = re.search(r"(\d+)", text)
+            length = int(m.group(1)) if m else 16
+            return PasswordCommands.generate(length)
+
+        # ── Timer / alarm ────────────────────────────────────────────────────
+        if any(k in text for k in ["set timer", "start timer", "set alarm", "remind me in"]):
+            secs = TimerCommands.parse_duration(text)
+            if secs:
+                # capture label after "for"
+                lbl_match = re.search(r"(?:to|for)\s+(.+?)(?:\s+in\s+|\s*$)", text)
+                label = lbl_match.group(1).strip() if lbl_match else "timer"
+                # The HUD/TTS callback fires on the timer thread — keep it simple
+                return TimerCommands.set_timer(secs, label)
+            return "Please tell me a duration, e.g. 'set timer for 5 minutes'."
+
+        if "list timers" in text or "active timers" in text or "show timers" in text:
+            return TimerCommands.list_active()
+
+        # ── Coin / dice / fact ───────────────────────────────────────────────
+        if "flip" in text and "coin" in text:
+            return FunCommands.coin_flip()
+        if "roll" in text and ("dice" in text or "die" in text):
+            m = re.search(r"(\d+)\s*d\s*(\d+)", text)
+            if m:
+                return FunCommands.dice_roll(int(m.group(2)), int(m.group(1)))
+            sides_m = re.search(r"d\s*(\d+)", text)
+            return FunCommands.dice_roll(int(sides_m.group(1)) if sides_m else 6)
+        if "random fact" in text or "fun fact" in text or "tell me a fact" in text:
+            return FunCommands.random_fact()
+
+        # ── News headlines ───────────────────────────────────────────────────
+        if any(k in text for k in ["news", "headlines", "what's happening"]):
+            return NewsCommands.headlines()
 
         # ── AI Fallback ───────────────────────────────────────────────────────
         print("[DISPATCH] No local match → AI fallback")
