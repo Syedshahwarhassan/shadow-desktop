@@ -83,14 +83,26 @@ class Listener:
         return ""
 
     def _recognize_parallel(self, audio):
+        # Fan out EN/UR recognizers in parallel and return as soon as ONE
+        # of them produces a result (instead of waiting up to 14s for both).
         results = {"en": "", "ur": ""}
+        done = threading.Event()
+
         def _recog(lang, key):
             try:
                 results[key] = self.recognizer.recognize_google(audio, language=lang).lower()
-            except: pass
+            except Exception:
+                pass
+            finally:
+                if results[key]:
+                    done.set()
 
-        t1 = threading.Thread(target=_recog, args=("en-US", "en"))
-        t2 = threading.Thread(target=_recog, args=("ur-PK", "ur"))
+        t1 = threading.Thread(target=_recog, args=("en-US", "en"), daemon=True)
+        t2 = threading.Thread(target=_recog, args=("ur-PK", "ur"), daemon=True)
         t1.start(); t2.start()
-        t1.join(timeout=7); t2.join(timeout=7)
+
+        # First-result wins (up to 5s); briefly wait for the other so the
+        # dispatcher can pick the more confident transcript when both arrive.
+        done.wait(timeout=5)
+        t1.join(timeout=0.4); t2.join(timeout=0.4)
         return results["en"], results["ur"]

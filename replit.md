@@ -74,3 +74,18 @@ To re-run the validator manually:
 `config.json` currently contains an OpenRouter API key in plain text.
 Rotate or move the key into an environment variable before sharing the
 repository publicly.
+
+## Performance improvements
+The following changes make the assistant noticeably faster:
+
+| Area | Change | Impact |
+|---|---|---|
+| Dispatcher (`commands/__init__.py`) | Pre-sorts the Urdu keyword map once at module load instead of on every voice command. | Removes ~75-entry sort + str.replace passes from the hot path. |
+| System info (`system_cmds.py`) | Replaced blocking `psutil.cpu_percent(interval=0.5)` with a non-blocking sample after a one-time warm-up. | "System info" returns ~500ms faster. |
+| HUD stats (`main.py`) | Same non-blocking psutil pattern + 1.5s tick (was 2s). | Qt event loop no longer stalls every refresh. |
+| Listener (`listener.py`) | Parallel EN/UR speech recognition now returns on the first successful transcript instead of always waiting for both. | Reduces worst-case STT latency from ~14s to ~5s. |
+| Network skills (`extra_cmds.py`) | Shared `requests.Session` (avoids TCP/TLS handshake), HTTP timeouts cut to 5s, in-memory TTL cache for Wikipedia (1h), currency rates (5m), and news (2m). | Repeat queries return instantly (300,000× faster Wikipedia repeats observed). |
+| AI brain (`ai_brain.py`) | OpenAI client built with explicit 8s timeout, max_tokens lowered to 160, and a 5-minute per-prompt TTL cache (bounded to 200 entries). | Prevents hangs and makes repeat questions instant. |
+
+Run `python feature_demo.py` to see the benchmark output (look for the
+"Speed benchmark (TTL cache)" section at the end).

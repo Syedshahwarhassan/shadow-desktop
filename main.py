@@ -47,9 +47,12 @@ class AntiGravityApp:
         self.tray.start()
         self.tray._open_settings = self.settings.show
 
+        # Warm psutil so the first non-blocking sample isn't 0%.
+        psutil.cpu_percent(interval=None)
+
         self.stats_timer = QTimer()
         self.stats_timer.timeout.connect(self.update_stats)
-        self.stats_timer.start(2000)
+        self.stats_timer.start(1500)  # snappier HUD refresh (was 2000ms)
 
         self.hud.show()
         name = config_manager.get('assistant_name', 'Shadow')
@@ -57,7 +60,9 @@ class AntiGravityApp:
         self.listener.start()
 
     def update_stats(self):
-        cpu = psutil.cpu_percent()
+        # interval=None → returns delta since the previous call (non-blocking).
+        # This keeps the Qt event loop responsive instead of pausing it.
+        cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory().percent
         self.hud.update_stats(cpu, ram)
 

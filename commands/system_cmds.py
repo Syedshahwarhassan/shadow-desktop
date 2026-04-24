@@ -4,13 +4,25 @@ import ctypes
 import os
 import webbrowser
 
+# Warm up psutil so subsequent non-blocking calls return real numbers
+# instantly instead of zero. This trades a tiny one-time cost for big
+# per-call savings (saves ~500ms on every "system info" command).
+psutil.cpu_percent(interval=None)
+
+
 class SystemCommands:
-    
+
     @staticmethod
     def get_system_info():
-        cpu = psutil.cpu_percent(interval=0.5)
+        # Non-blocking sample (uses delta since the previous call → instant).
+        cpu = psutil.cpu_percent(interval=None)
         ram = psutil.virtual_memory().percent
-        disk = psutil.disk_usage('C:/').percent
+        # Disk path differs by OS; pick the right one rather than crashing on Linux.
+        disk_path = 'C:/' if os.name == 'nt' else '/'
+        try:
+            disk = psutil.disk_usage(disk_path).percent
+        except Exception:
+            disk = 0
         info = f"CPU {cpu}%, RAM {ram}%, Disk {disk}%"
         print(f"[CMD] System Info → {info}")
         return f"System Status: CPU {cpu} percent, RAM {ram} percent, Disk {disk} percent."

@@ -119,6 +119,10 @@ URDU_MAP = {
     "give me a gift status": "git status",
 }
 
+# Pre-sort the Urdu map ONCE at module load (longest-key first) so the
+# dispatcher doesn't pay the O(n log n) sort cost on every voice command.
+_URDU_SORTED = sorted(URDU_MAP.items(), key=lambda x: -len(x[0]))
+
 # Apps that appear BEFORE "open/kholo" in Urdu speech order
 # e.g.  "spotify kholo"  →  normalization yields "spotify open"
 # We flip them so dispatcher can match "open spotify"
@@ -150,9 +154,10 @@ class CommandDispatcher:
     def _normalize(self, text):
         """Lower-case, translate Urdu keywords, fix word order."""
         t = text.lower().strip()
-        # Apply Urdu → English map (longest match first to avoid partial replacements)
-        for urdu, english in sorted(URDU_MAP.items(), key=lambda x: -len(x[0])):
-            t = t.replace(urdu, english)
+        # Apply pre-sorted Urdu → English map (sorted once at module load).
+        for urdu, english in _URDU_SORTED:
+            if urdu in t:  # cheap membership check before str.replace allocation
+                t = t.replace(urdu, english)
         # Fix reversed Urdu word order
         t = _fix_word_order(t)
         return t

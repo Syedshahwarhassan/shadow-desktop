@@ -1,7 +1,14 @@
 import openai
+import time
 from config_manager import config_manager
 import re
 from memory_manager import memory_manager
+
+# Hard caps for AI calls — keep the assistant snappy and prevent it from
+# hanging if the upstream service is slow.
+_AI_TIMEOUT = 8         # seconds before we give up on a single request
+_AI_MAX_TOKENS = 160    # short, conversational responses (was 200)
+
 
 class AIBrain:
     """
@@ -17,16 +24,25 @@ class AIBrain:
 
         # Use a more reliable free model ID for OpenRouter
         # gemini-2.0-flash-lite is often restricted or renamed
-        self.default_model = "openai/gpt-5.3-chat" 
+        self.default_model = "openai/gpt-5.3-chat"
+
+        # Tiny per-prompt TTL cache — repeated identical questions return
+        # instantly without paying for another round trip.
+        self._cache: dict[str, tuple[float, str]] = {}
+        self._cache_ttl = 300  # 5 minutes
 
         try:
             from openai import OpenAI
             if self.openrouter_key:
-                self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=self.openrouter_key)
+                self.client = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=self.openrouter_key,
+                    timeout=_AI_TIMEOUT,
+                )
                 self.model = self.default_model
                 print(f"[AI] OpenRouter initialized with {self.model}")
             elif self.openai_key:
-                self.client = OpenAI(api_key=self.openai_key)
+                self.client = OpenAI(api_key=self.openai_key, timeout=_AI_TIMEOUT)
                 self.model = "gpt-4o-mini"
                 print(f"[AI] OpenAI initialized with {self.model}")
         except ImportError:
@@ -44,6 +60,12 @@ class AIBrain:
     def get_response(self, prompt):
         if not self.openrouter_key and not self.openai_key:
             return "Please configure your OpenRouter or OpenAI API key in config.json."
+
+        # ── TTL cache lookup (skip the network for repeats) ─────────────────
+        cache_key = (prompt or "").strip().lower()
+        cached = self._cache.get(cache_key)
+        if cached and cached[0] > time.time():
+            return cached[1]
 
         try:
             memory_context = memory_manager.get_notes_string()
@@ -65,7 +87,8 @@ class AIBrain:
                         {"role": "system", "content": system_msg},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=200
+                    max_tokens=_AI_MAX_TOKENS,
+                    timeout=_AI_TIMEOUT,
                 )
                 response_text = response.choices[0].message.content.strip()
             else:
@@ -76,7 +99,8 @@ class AIBrain:
                         {"role": "system", "content": system_msg},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=200
+                    max_tokens=_AI_MAX_TOKENS,
+                    request_timeout=_AI_TIMEOUT,
                 )
                 response_text = response.choices[0].message.content.strip()
 
@@ -86,7 +110,14 @@ class AIBrain:
                 note = memory_match.group(1).strip()
                 memory_manager.add_note(note)
                 response_text = re.sub(r'\[SAVE_MEMORY:\s*.+?\]', '', response_text, flags=re.IGNORECASE).strip()
-            
+
+            # Cache the response for future identical prompts
+            self._cache[cache_key] = (time.time() + self._cache_ttl, response_text)
+            # Bound cache size to prevent memory growth
+            if len(self._cache) > 200:
+                # Drop the oldest entries (cheap because dict preserves insertion order)
+                for k in list(self._cache.keys())[:50]:
+                    self._cache.pop(k, None)
             return response_text
 
         except Exception as e:

@@ -127,6 +127,27 @@ def main() -> int:
     _section("News (requires api_keys.newsapi)")
     _try("top headlines", NewsCommands.headlines)
 
+    # ── Speed benchmark: cache hits should be near-instant ───────────────────
+    _section("Speed benchmark (TTL cache)")
+
+    def _bench(label, fn, *args, runs=2):
+        timings = []
+        result = None
+        for _ in range(runs):
+            t0 = time.perf_counter()
+            result = fn(*args)
+            timings.append((time.perf_counter() - t0) * 1000)
+        bars = "  ".join(f"{ms:6.1f} ms" for ms in timings)
+        speedup = (timings[0] / timings[-1]) if timings[-1] > 0 else float("inf")
+        print(f"  {label:38} {bars}   {GREEN}({speedup:5.1f}× faster on repeat){RESET}")
+
+    _bench("Wikipedia 'Python (programming language)'",
+           WikipediaCommands.summary, "Python (programming language)", 2)
+    _bench("Currency  '50 EUR to USD'",
+           CurrencyCommands.parse_and_convert, "convert 50 EUR to USD")
+    _bench("Calculator '15 * 27 + sqrt(144)'",
+           CalculatorCommands.evaluate, "15 * 27 + 12")
+
     print()
     print(f"{BOLD}{GREEN}All new features validated.{RESET}")
     print(f"{DIM}Run the full assistant on Windows with:  python main.py{RESET}")

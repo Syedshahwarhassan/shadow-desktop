@@ -25,9 +25,40 @@ import random
 import secrets
 import string
 import threading
+import time
 from datetime import datetime, timedelta
 
 import requests
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tiny shared TTL cache — speeds up repeated network lookups (Wikipedia,
+# currency, news) so saying the same query twice is instant the second time.
+# ─────────────────────────────────────────────────────────────────────────────
+_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _cache_get(key: str, ttl: float):
+    item = _CACHE.get(key)
+    if item is None:
+        return None
+    expires_at, value = item
+    if expires_at < time.time():
+        _CACHE.pop(key, None)
+        return None
+    return value
+
+
+def _cache_set(key: str, value, ttl: float) -> None:
+    _CACHE[key] = (time.time() + ttl, value)
+
+
+# Reuse a single HTTP session — avoids the ~50-150ms TCP/TLS handshake
+# every time we hit Wikipedia / currency / news endpoints.
+_SESSION = requests.Session()
+_SESSION.headers.update({"User-Agent": "AntiGravity/1.0"})
+
+# Snappier failure for hung network calls (was 8s)
+_HTTP_TIMEOUT = 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,12 +70,22 @@ class WikipediaCommands:
         query = (query or "").strip()
         if not query:
             return "Please tell me what to look up."
+
+        # Cache hit → instant return for repeated queries (1 hour TTL).
+        cache_key = f"wiki:{query.lower()}:{sentences}"
+        cached = _cache_get(cache_key, ttl=3600)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
+
         try:
             import wikipedia  # type: ignore
         except ImportError:
             return "Wikipedia module not installed. Run: pip install wikipedia"
         try:
-            return wikipedia.summary(query, sentences=sentences, auto_suggest=True)
+            wikipedia.set_rate_limiting(False)  # avoid built-in throttle delay
+            result = wikipedia.summary(query, sentences=sentences, auto_suggest=True)
+            _cache_set(cache_key, result, ttl=3600)
+            return result
         except wikipedia.DisambiguationError as e:  # type: ignore[attr-defined]
             options = ", ".join(e.options[:5])
             return f"That term is ambiguous. Try one of: {options}."
@@ -125,11 +166,19 @@ class CurrencyCommands:
         try:
             src = (src or "USD").upper()
             dst = (dst or "PKR").upper()
-            url = f"https://open.er-api.com/v6/latest/{src}"
-            r = requests.get(url, timeout=8)
-            r.raise_for_status()
-            data = r.json()
-            rate = data.get("rates", {}).get(dst)
+
+            # Cache the entire rate table per base currency for 5 minutes
+            # (rates barely move and this turns repeat conversions instant).
+            cache_key = f"fx:{src}"
+            data = _cache_get(cache_key, ttl=300)
+            if data is None:
+                url = f"https://open.er-api.com/v6/latest/{src}"
+                r = _SESSION.get(url, timeout=_HTTP_TIMEOUT)
+                r.raise_for_status()
+                data = r.json()
+                _cache_set(cache_key, data, ttl=300)
+
+            rate = (data or {}).get("rates", {}).get(dst)
             if rate is None:
                 return f"I don't have a rate for {src} → {dst}."
             converted = float(amount) * float(rate)
@@ -322,17 +371,24 @@ class NewsCommands:
             key = None
         if not key:
             return "News API key not configured. Add it to config.json under api_keys.newsapi."
+        # Cache headlines for 2 minutes — repeat asks within that window are instant.
+        cache_key = f"news:{country}:{limit}"
+        cached = _cache_get(cache_key, ttl=120)
+        if cached is not None:
+            return cached  # type: ignore[return-value]
         try:
-            r = requests.get(
+            r = _SESSION.get(
                 "https://newsapi.org/v2/top-headlines",
                 params={"country": country, "pageSize": limit, "apiKey": key},
-                timeout=8,
+                timeout=_HTTP_TIMEOUT,
             )
             r.raise_for_status()
             arts = r.json().get("articles", [])
             if not arts:
                 return "No headlines found."
             lines = [f"  {i+1}. {a.get('title','')}" for i, a in enumerate(arts[:limit])]
-            return "Top headlines:\n" + "\n".join(lines)
+            result = "Top headlines:\n" + "\n".join(lines)
+            _cache_set(cache_key, result, ttl=120)
+            return result
         except Exception as e:
             return f"News fetch failed: {e}"
