@@ -1,0 +1,32 @@
+{
+    "assistant_name": "Shadow",
+    "wake_word": "shadow",
+    "voice": {
+        "id": "male_british",
+        "rate": 160,
+        "volume": 1.0,
+        "force_powershell": true
+    },
+    "hud": {
+        "opacity": 0.8,
+        "theme_color": "#00D4FF",
+        "position": "center",
+        "diameter": 150
+    },
+    "api_keys": {
+        "openai": "",
+        "openrouter": "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",
+        "openweathermap": "",
+        "newsapi": ""
+    },
+    "credentials": {
+        "gmail_email": "",
+        "gmail_password": ""
+    },
+    "contacts": {
+        "mom": "+923193544301",
+        "dad": "+923003544301",
+        "mama": "+923086243665",
+        "me": "+923262780472"
+    }
+}
