@@ -21,11 +21,20 @@ class HUDWindow(QWidget):
         
         self.angle = 0
         self.pulse = 0
-        self.status = "IDLE" # IDLE, LISTENING, SPEAKING
+        self.status = "IDLE" # IDLE, LISTENING, THINKING, SPEAKING
         self.last_command = ""
         self.ai_response = ""
         self.cpu_usage = 0
         self.ram_usage = 0
+        self.current_emotion = "CALM"
+        self.emotion_colors = {
+            "HAPPY":   QColor(0, 255, 128),  # Spring Green
+            "EXCITED": QColor(255, 215, 0),  # Gold
+            "SAD":     QColor(100, 100, 255), # Soft Blue
+            "ANGRY":   QColor(255, 69, 0),   # Red-Orange
+            "CURIOUS": QColor(255, 0, 255),  # Magenta
+            "CALM":    QColor(0, 212, 255),  # Default Cyan
+        }
         
         self.timer = QTimer()
         self.timer.timeout.connect(self.update)
@@ -66,6 +75,12 @@ class HUDWindow(QWidget):
     def update_stats(self, cpu, ram):
         self.cpu_usage = cpu
         self.ram_usage = ram
+
+    def set_emotion(self, emotion):
+        if emotion in self.emotion_colors:
+            self.current_emotion = emotion
+            # Trigger a refresh
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -111,16 +126,20 @@ class HUDWindow(QWidget):
         painter.drawArc(rect_inner, int((-self.angle * 2 + 180) * 16), 90 * 16)
         
         # Center Orb
+        base_color = self.emotion_colors.get(self.current_emotion, theme_color)
+        
         if self.status == "LISTENING":
-            orb_color = QColor(0, 212, 255, int(150 + pulse_val * 105))
+            orb_color = QColor(base_color.red(), base_color.green(), base_color.blue(), int(150 + pulse_val * 105))
+        elif self.status == "THINKING":
+            orb_color = QColor(255, 170, 0, int(180 + pulse_val * 75)) # Keep Thinking as Orange
         elif self.status == "SPEAKING":
-            orb_color = QColor(0, 102, 255, 200)
+            orb_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 220)
         else:
-            orb_color = QColor(0, 212, 255, 100)
+            orb_color = QColor(base_color.red(), base_color.green(), base_color.blue(), 100)
             
         painter.setBrush(orb_color)
         painter.setPen(Qt.PenStyle.NoPen)
-        orb_size = 40 + (pulse_val * 10 if self.status == "LISTENING" else 0)
+        orb_size = 40 + (pulse_val * 10 if self.status in ["LISTENING", "THINKING"] else 0)
         painter.drawEllipse(center, orb_size, orb_size)
         
         # Text Info

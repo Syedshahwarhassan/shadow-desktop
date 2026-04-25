@@ -35,6 +35,8 @@ COMMAND_TIMEOUT = 20  # seconds before giving up on a command
 
 class VoiceSignal(QObject):
     command_received = pyqtSignal(str)
+    response_ready = pyqtSignal(str)
+    status_update = pyqtSignal(str)
 
 class AntiGravityApp:
     def __init__(self):
@@ -43,9 +45,11 @@ class AntiGravityApp:
         self.settings = SettingsWindow(self.hud)
         self.dispatcher = CommandDispatcher(self.hud)
 
-        # Thread-safe signal: listener thread -> main Qt thread
+        # Thread-safe signals: worker thread -> main Qt thread
         self.signals = VoiceSignal()
         self.signals.command_received.connect(self.handle_command)
+        self.signals.response_ready.connect(self.finalize_response)
+        self.signals.status_update.connect(self.hud.set_status)
 
         self.listener = Listener(self.signals.command_received.emit)
 
@@ -80,36 +84,66 @@ class AntiGravityApp:
 
         print(f"\n{'='*50}")
         print(f"[COMMAND] Processing: '{text}'")
-        self.hud.set_status("SPEAKING")
+        self.hud.set_status("THINKING")
         self.hud.set_command(text)
 
-        # Run dispatch in a worker thread with timeout
-        result = {"response": None}
-
-        def _run():
+        # Run dispatch in a background thread to keep UI responsive
+        def _worker_task():
             try:
-                result["response"] = self.dispatcher.dispatch(text)
+                # Dispatch the command (might take seconds)
+                response = self.dispatcher.dispatch(text)
+                self.signals.response_ready.emit(response)
             except Exception as e:
-                result["response"] = f"Command error: {str(e)}"
                 print(f"[ERROR] {e}")
+                self.signals.response_ready.emit(f"Command error: {str(e)}")
 
-        worker = threading.Thread(target=_run, daemon=True)
-        worker.start()
-        worker.join(timeout=COMMAND_TIMEOUT)
+        threading.Thread(target=_worker_task, daemon=True).start()
 
-        if worker.is_alive() or result["response"] is None:
-            response = "I could not process that. Please try again."
-            print(f"[TIMEOUT] Command timed out after {COMMAND_TIMEOUT}s")
+    def finalize_response(self, response):
+        def extract_emotion(text):
+            for emotion in ["HAPPY", "SAD", "EXCITED", "ANGRY", "CURIOUS", "CALM"]:
+                tag = f"[{emotion}]"
+                if text.startswith(tag):
+                    return emotion, text[len(tag):].strip()
+            return "CALM", text
+
+        self.hud.set_status("SPEAKING")
+        
+        if isinstance(response, str):
+            emotion, clean_text = extract_emotion(response)
+            print(f"[RESPONSE] {clean_text} (Emotion: {emotion})")
+            self.hud.set_emotion(emotion)
+            self.hud.set_response(clean_text)
+            tts_engine.speak(response) # TTS engine handles the tag itself for modulation
         else:
-            response = result["response"]
-            print(f"[RESPONSE] {response}")
-
-        self.hud.set_response(response)
-        tts_engine.speak(response)
+            # It's a generator (streaming AI)
+            full_response = ""
+            first_chunk = True
+            for sentence in response:
+                if not sentence: continue
+                
+                if first_chunk:
+                    emotion, _ = extract_emotion(sentence)
+                    self.hud.set_emotion(emotion)
+                    first_chunk = False
+                
+                print(f"[STREAM] {sentence}")
+                full_response += sentence + " "
+                
+                # Update response text in HUD (stripping tags for display)
+                display_text = full_response
+                for tag in ["[HAPPY]", "[SAD]", "[EXCITED]", "[ANGRY]", "[CURIOUS]", "[CALM]"]:
+                    display_text = display_text.replace(tag, "")
+                
+                self.hud.set_response(display_text.strip())
+                tts_engine.speak(sentence)
+            print(f"[RESPONSE COMPLETE]")
+        
         print(f"{'='*50}\n")
         print("[LISTENING] Back to listening...")
 
-        QTimer.singleShot(3000, lambda: self.hud.set_status("IDLE"))
+        # Reset status after some time
+        QTimer.singleShot(4000, lambda: self.hud.set_status("IDLE"))
 
     def run(self):
         sys.exit(self.app.exec())

@@ -108,6 +108,20 @@ URDU_MAP = {
     "aqwal":        "quote",
     "motivation":   "quote",
     "اقوال":         "quote",
+    # Timer / Alarm
+    "timer lagao":  "set timer",
+    "timer set karo": "set timer",
+    "timer laga do": "set timer",
+    "ka timer":     "set timer",
+    "alarm lagao":  "set alarm",
+    "alarm set karo": "set alarm",
+    "alarm laga do": "set alarm",
+    "ka alarm":     "set alarm",
+    "baje":         "pm",
+    "yad dilana":   "remind me",
+    "yad dilao":    "remind me",
+    "ٹائمر لگاؤ":      "set timer",
+    "الارم لگاؤ":      "set alarm",
     # Dictation/Typing
     "likhna shuru karo": "dictation on",
     "لکھنا شروع کرو":    "dictation on",
@@ -645,4 +659,4 @@ class CommandDispatcher:
 
         # ── AI Fallback ───────────────────────────────────────────────────────
         print("[DISPATCH] No local match → AI fallback")
-        return ai_brain.get_response(raw_text)
+        return ai_brain.get_response(raw_text, stream=True)

@@ -25,8 +25,8 @@ class Listener:
 
         self.recognizer.energy_threshold        = 250
         self.recognizer.dynamic_energy_threshold = False
-        self.recognizer.pause_threshold          = 0.6
-        self.recognizer.non_speaking_duration    = 0.4
+        self.recognizer.pause_threshold          = 0.5
+        self.recognizer.non_speaking_duration    = 0.3
 
         print("[INIT] Calibrating microphone...")
         with self.microphone as source:
@@ -130,8 +130,8 @@ class Listener:
         t2 = threading.Thread(target=_recog, args=("ur-PK", "ur"), daemon=True)
         t1.start(); t2.start()
 
-        # First-result wins (up to 5s); briefly wait for the other so the
+        # First-result wins (up to 3s); briefly wait for the other so the
         # dispatcher can pick the more confident transcript when both arrive.
-        done.wait(timeout=5)
+        done.wait(timeout=3)
         t1.join(timeout=0.4); t2.join(timeout=0.4)
         return results["en"], results["ur"]

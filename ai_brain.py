@@ -26,7 +26,7 @@ class AIBrain:
         self._cache_ttl = 300  # 5 minutes TTL
 
         # Use a more reliable free model ID for OpenRouter
-        self.default_model = "google/gemini-2.0-flash-lite-preview-02-05:free" 
+        self.default_model = "openai/gpt-4o-mini" 
 
         try:
             from openai import OpenAI
@@ -54,11 +54,10 @@ class AIBrain:
                 self.model = "gpt-4o-mini"
                 print(f"[AI] OpenAI initialized (Legacy) with {self.model}")
 
-    def get_response(self, prompt):
+    def get_response(self, prompt, stream=False):
         if not self.openrouter_key and not self.openai_key:
             return "Please configure your OpenRouter or OpenAI API key in config.json."
 
-        # ── TTL cache lookup (skip the network for repeats) ─────────────────
         cache_key = (prompt or "").strip().lower()
         cached = self._cache.get(cache_key)
         if cached and cached[0] > time.time():
@@ -67,21 +66,18 @@ class AIBrain:
         try:
             memory_context = memory_manager.get_notes_string()
             system_msg = (
-                "You are Shadow, a highly advanced but deeply human-like female AI assistant. "
-                "You have a warm, friendly feminine personality, a sense of humor, and you ALWAYS speak colloquially in Urdu. "
-                "You MUST respond ONLY in Urdu, never in English. "
-                "Instead of acting like a rigid robot, you express emotions, empathy, and conversational nuance. "
-                "CRITICAL: Use expressive punctuation like '!' for excitement/emphasis and '?' for questions. "
-                "Use natural emotive words (e.g., 'واہ', 'ارے', 'افسوس', 'ہاہا') so your text carries feeling. Keep responses concise but natural. "
-                "CRITICAL: NEVER say your own name ('Shadow' or 'شیڈو') in your responses to prevent audio feedback loops. Refer to yourself in the first person ('میں' or 'مجھے'). "
-                "You have a long-term memory system. "
+                "You are Shadow, a highly expressive and friendly female AI assistant. "
+                "Speak ONLY in natural, colloquial Urdu. Use emotive words like 'واہ', 'ارے', 'اوہ'. "
+                "You MUST start EVERY response with one of these emotion tags: "
+                "[HAPPY], [SAD], [EXCITED], [ANGRY], [CURIOUS], [CALM]. "
+                "Be human-like, warm, and natural. Do not be robotic. "
+                "NEVER say 'Shadow' or 'شیڈو'. "
                 f"{memory_context}\n"
-                "If the user asks you to remember something, note down a fact, or set a reminder, you MUST append "
-                "`[SAVE_MEMORY: the information to remember]` at the very end of your response. "
-                "For example, if the user says 'remember that my favorite color is red', you reply normally in Urdu and end with '[SAVE_MEMORY: User\\'s favorite color is red]'."
+                "Append `[SAVE_MEMORY: info]` if asked to remember something."
             )
             
             if not self.is_legacy and self.client:
+                # Use streaming for lower latency
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -90,10 +86,16 @@ class AIBrain:
                     ],
                     max_tokens=_AI_MAX_TOKENS,
                     timeout=_AI_TIMEOUT,
+                    stream=stream
                 )
-                response_text = response.choices[0].message.content.strip()
+                
+                if not stream:
+                    response_text = response.choices[0].message.content.strip()
+                    return self._process_response(response_text, cache_key)
+                else:
+                    return self._stream_generator(response, cache_key)
             else:
-                # Legacy style
+                # Legacy or fallback (no stream support implemented for legacy here)
                 response = openai.ChatCompletion.create(
                     model=self.model,
                     messages=[
@@ -104,33 +106,51 @@ class AIBrain:
                     request_timeout=_AI_TIMEOUT,
                 )
                 response_text = response.choices[0].message.content.strip()
-
-            # Process memory tags
-            memory_match = re.search(r'\[SAVE_MEMORY:\s*(.+?)\]', response_text, re.IGNORECASE)
-            if memory_match:
-                note = memory_match.group(1).strip()
-                memory_manager.add_note(note)
-                response_text = re.sub(r'\[SAVE_MEMORY:\s*.+?\]', '', response_text, flags=re.IGNORECASE).strip()
-
-            # Cache the response for future identical prompts
-            self._cache[cache_key] = (time.time() + self._cache_ttl, response_text)
-            # Bound cache size to prevent memory growth
-            if len(self._cache) > 200:
-                # Drop the oldest entries (cheap because dict preserves insertion order)
-                for k in list(self._cache.keys())[:50]:
-                    self._cache.pop(k, None)
-            return response_text
+                return self._process_response(response_text, cache_key)
 
         except Exception as e:
             print(f"[AI] Error: {e}")
-            if "User not found" in str(e):
-                return "My OpenRouter API key is invalid or deleted. Please update it in config.json."
-            # Try a different model if the first one fails
-            if "not a valid model ID" in str(e) and self.model != "openai/gpt-3.5-turbo":
-                print("[AI] Retrying with gpt-3.5-turbo...")
-                self.model = "openai/gpt-3.5-turbo"
-                return self.get_response(prompt)
-            return "I am having trouble connecting to my AI core."
+            # Fallback to local offline memory system
+            return memory_manager.get_offline_response(prompt)
+
+    def _process_response(self, response_text, cache_key):
+        # Process memory tags
+        memory_match = re.search(r'\[SAVE_MEMORY:\s*(.+?)\]', response_text, re.IGNORECASE)
+        if memory_match:
+            note = memory_match.group(1).strip()
+            memory_manager.add_note(note)
+            response_text = re.sub(r'\[SAVE_MEMORY:\s*.+?\]', '', response_text, flags=re.IGNORECASE).strip()
+
+        # Cache the response
+        self._cache[cache_key] = (time.time() + self._cache_ttl, response_text)
+        if len(self._cache) > 200:
+            for k in list(self._cache.keys())[:50]:
+                self._cache.pop(k, None)
+        return response_text
+
+    def _stream_generator(self, response_stream, cache_key):
+        full_text = ""
+        sentence_buffer = ""
+        
+        try:
+            for chunk in response_stream:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_text += content
+                    sentence_buffer += content
+                    
+                    # Yield sentence by sentence for TTS
+                    if any(p in content for p in [".", "!", "?", "۔", "\n"]):
+                        yield sentence_buffer.strip()
+                        sentence_buffer = ""
+            
+            if sentence_buffer.strip():
+                yield sentence_buffer.strip()
+                
+            self._process_response(full_text, cache_key)
+        except Exception as e:
+            print(f"[AI] Stream Error: {e}")
+            yield "I am having trouble streaming the response."
 
     def generate_code(self, prompt):
         """Generates raw code from a prompt, strictly formatted as markdown blocks."""

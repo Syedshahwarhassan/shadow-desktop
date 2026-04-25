@@ -308,10 +308,31 @@ class TimerCommands:
 
     @staticmethod
     def parse_duration(text: str) -> int | None:
-        """Parse '5 minutes', '30 seconds', '1 hour 20 minutes'."""
+        """Parse '5 minutes' (relative) OR 'at 2pm' (absolute)."""
+        text = text.lower()
+        
+        # 1. Try absolute time patterns: "at 2pm", "at 14:30", "at 5"
+        # Pattern: (at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?
+        abs_match = re.search(r"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", text)
+        if abs_match:
+            hour = int(abs_match.group(1))
+            minute = int(abs_match.group(2)) if abs_match.group(2) else 0
+            meridiem = abs_match.group(3)
+            
+            if meridiem == "pm" and hour < 12: hour += 12
+            if meridiem == "am" and hour == 12: hour = 0
+            
+            now = datetime.now()
+            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            
+            return int((target - now).total_seconds())
+
+        # 2. Existing relative duration logic
         total = 0
         found = False
-        for value, unit in re.findall(r"(\d+)\s*(hour|hr|minute|min|second|sec)s?", text.lower()):
+        for value, unit in re.findall(r"(\d+)\s*(hour|hr|minute|min|second|sec)s?", text):
             v = int(value)
             if unit.startswith("h"):
                 total += v * 3600
