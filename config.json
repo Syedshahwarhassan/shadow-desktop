@@ -15,18 +15,12 @@
     },
     "api_keys": {
         "openai": "",
-        "openrouter": "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",
+        "openrouter": "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",
         "openweathermap": "",
         "newsapi": ""
     },
     "credentials": {
         "gmail_email": "",
         "gmail_password": ""
-    },
-    "contacts": {
-        "mom": "+923193544301",
-        "dad": "+923003544301",
-        "mama": "+923086243665",
-        "me": "+923262780472"
     }
 }

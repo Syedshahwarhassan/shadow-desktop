@@ -25,8 +25,7 @@ class AIBrain:
         self._cache_ttl = 300  # 5 minutes TTL
 
         # Use a more reliable free model ID for OpenRouter
-        # gemini-2.0-flash-lite is often restricted or renamed
-        self.default_model = "openai/gpt-5.3-chat" 
+        self.default_model = "google/gemini-2.0-flash-lite-preview-02-05:free" 
 
         try:
             from openai import OpenAI
@@ -123,6 +122,8 @@ class AIBrain:
 
         except Exception as e:
             print(f"[AI] Error: {e}")
+            if "User not found" in str(e):
+                return "My OpenRouter API key is invalid or deleted. Please update it in config.json."
             # Try a different model if the first one fails
             if "not a valid model ID" in str(e) and self.model != "openai/gpt-3.5-turbo":
                 print("[AI] Retrying with gpt-3.5-turbo...")
