@@ -90,6 +90,18 @@ class SystemCommands:
         return f"Restarting in {timer} seconds."
 
     @staticmethod
+    def restart_self():
+        import sys
+        print("[CMD] Restarting Shadow...")
+        # os.execv replaces the current process with a new one
+        os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+
+    @staticmethod
+    def close_self():
+        print("[CMD] Closing Shadow...")
+        os._exit(0)
+
+    @staticmethod
     def open_app(app_name):
         app_name = app_name.lower().strip()
         print(f"[CMD] Open app request: '{app_name}'")

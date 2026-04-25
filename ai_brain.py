@@ -21,6 +21,8 @@ class AIBrain:
         self.openai_key = config_manager.get("api_keys.openai")
         self.client = None
         self.is_legacy = False
+        self._cache = {}
+        self._cache_ttl = 300  # 5 minutes TTL
 
         # Use a more reliable free model ID for OpenRouter
         # gemini-2.0-flash-lite is often restricted or renamed

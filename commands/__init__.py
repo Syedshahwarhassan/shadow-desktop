@@ -212,6 +212,12 @@ class CommandDispatcher:
         if any(k in text for k in ["lock", "screen lock"]):
             return SystemCommands.lock_screen()
             
+        # ── Self Power / Close ────────────────────────────────────────────────
+        if any(k in text for k in ["restart yourself", "restart shadow", "restart system"]):
+            return SystemCommands.restart_self()
+        if any(k in text for k in ["close yourself", "close shadow", "exit yourself", "quit yourself"]):
+            return SystemCommands.close_self()
+
         # Handle 'close' or 'stop' generally
         if any(k in text for k in ["close", "stop", "band karo"]):
             return "Kaam rok diya gaya hai."
