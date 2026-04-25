@@ -17,6 +17,7 @@ from .extra_cmds import (
     FunCommands,
     NewsCommands,
 )
+from .advanced_cmds import AdvancedCommands
 from ai_brain import ai_brain
 
 # ── Urdu → English keyword map ───────────────────────────────────────────────
@@ -114,8 +115,35 @@ URDU_MAP = {
     "لکھنا بند کرو":     "dictation off",
     "ٹائپ کرو":          "type",
     # WhatsApp
-    "واٹس ایپ":      "whatsapp",
+    "whatsapp":   "whatsapp",
     "میسج بھیجو":    "message bhejo",
+    # Advanced
+    "ip batao":     "my ip",
+    "speed test":   "speed test",
+    "safai karo":   "organize desktop",
+    "urdu mein":    "translate to urdu",
+    "english mein": "translate to english",
+    "health check": "system health",
+    # Productivity
+    "kaam likho":   "add to do",
+    "tasks dikhao": "list to do",
+    "kaam ho gaya": "task done",
+    "clipboard check": "get clipboard",
+    "copy karo":    "set clipboard",
+    "focus mode":   "pomodoro",
+    "bara karo":    "maximize window",
+    "chota karo":   "minimize window",
+    "screen saaf karo": "minimize all",
+    "file kholo":   "open file",
+    # Out of Minds
+    "screen dekho": "analyze screen",
+    "ye kya hai":   "analyze screen",
+    "research karo": "research topic",
+    "mouse upar":   "mouse up",
+    "mouse neeche": "mouse down",
+    "mouse dayein": "mouse right",
+    "mouse bayein": "mouse left",
+    "click karo":   "mouse click",
     # Git (common mishears)
     "gift status":  "git status",
     "gaming kids status": "git status",
@@ -184,6 +212,47 @@ class CommandDispatcher:
         # ── System Info ───────────────────────────────────────────────────────
         if any(k in text for k in ["system info", "cpu info", "stats", "how is my pc"]):
             return SystemCommands.get_system_info()
+
+        if any(k in text for k in ["system health", "health check", "battery status"]):
+            return AdvancedCommands.get_system_health()
+
+        # ── Network ───────────────────────────────────────────────────────────
+        if any(k in text for k in ["my ip", "ip address", "ip batao"]):
+            return AdvancedCommands.get_ip_info()
+
+        if any(k in text for k in ["speed test", "internet speed"]):
+            return AdvancedCommands.run_speed_test()
+
+        # ── AI Vision (Out of Minds) ──────────────────────────────────────────
+        if any(k in text for k in ["analyze screen", "screen dekho", "ye kya hai"]):
+            prompt = re.sub(r"(analyze screen|screen dekho|ye kya hai|batao|karo|shadow|ye)", "", text).strip()
+            if not prompt: prompt = "Describe what is on this screen."
+            return AdvancedCommands.analyze_screen(prompt)
+
+        # ── Autonomous Research ───────────────────────────────────────────────
+        if "research" in text:
+            topic = re.sub(r"(research topic|research karo|research on|research)", "", text).strip()
+            if topic:
+                return AdvancedCommands.autonomous_research(topic)
+            return "Kis topic par research karun?"
+
+        # ── Mouse Control ─────────────────────────────────────────────────────
+        if "mouse" in text or "click" in text:
+            amount_match = re.search(r"(\d+)", text)
+            amount = amount_match.group(1) if amount_match else 100
+            
+            if "upar" in text or "up" in text: return AdvancedCommands.mouse_control("up", amount)
+            if "neeche" in text or "down" in text: return AdvancedCommands.mouse_control("down", amount)
+            if "dayein" in text or "right" in text: return AdvancedCommands.mouse_control("right", amount)
+            if "bayein" in text or "left" in text: return AdvancedCommands.mouse_control("left", amount)
+            if "double click" in text: return AdvancedCommands.mouse_control("double click")
+            if "click" in text: return AdvancedCommands.mouse_control("click")
+
+        # ── Port Checker ──────────────────────────────────────────────────────
+        if "port" in text:
+            m = re.search(r"(\d+)", text)
+            if m:
+                return AdvancedCommands.check_port(m.group(1))
 
         # ── Volume ────────────────────────────────────────────────────────────
         if any(k in text for k in ["volume", "awaaz"]):
@@ -273,6 +342,13 @@ class CommandDispatcher:
                 return SystemCommands.search_and_open_folder(folder_name)
             return "Kaun sa folder open karun?"
 
+        # ── Open file (Search in D drive) ─────────────────────────────────────
+        if any(k in text for k in ["open file", "search file", "file kholo", "find file"]):
+            file_name = re.sub(r"(please|open file|search file|file kholo|find file|named|called|naam ki|ko)", "", text).strip()
+            if file_name:
+                return AdvancedCommands.search_and_open_file(file_name)
+            return "Kaun si file open karun?"
+
         # ── Open app ─────────────────────────────────────────────────────────
         # Matches: "open X", "launch X", "start X", "X open", "X chalao"
         triggers = ["open", "launch", "start", "run"]
@@ -321,6 +397,17 @@ class CommandDispatcher:
                 name = "New File"
             return DesktopCommands.create_file(name)
 
+        # ── Advanced Desktop ──────────────────────────────────────────────────
+        if any(k in text for k in ["organize desktop", "desktop organize", "safai karo"]):
+            import winshell
+            desktop = winshell.desktop()
+            return AdvancedCommands.organize_folder(desktop)
+
+        if any(k in text for k in ["organize downloads", "downloads organize"]):
+            import winshell
+            downloads = winshell.folder("downloads")
+            return AdvancedCommands.organize_folder(downloads)
+
         # ── Screenshot ────────────────────────────────────────────────────────
         if "screenshot" in text:
             return DesktopCommands.screenshot()
@@ -334,6 +421,47 @@ class CommandDispatcher:
             if note:
                 return DesktopCommands.take_note(note)
             return "Kya note karna hai?"
+
+        # ── To-Do List ────────────────────────────────────────────────────────
+        if "to do" in text or "kaam" in text or "task" in text:
+            if any(k in text for k in ["add", "likho", "create"]):
+                task = re.sub(r"(add to do|add task|kaam likho|task likho|add|likho|ko)", "", text).strip()
+                return AdvancedCommands.todo_manager("add", task)
+            if any(k in text for k in ["list", "show", "batao", "dikhao"]):
+                return AdvancedCommands.todo_manager("list")
+            if any(k in text for k in ["clear", "delete all"]):
+                return AdvancedCommands.todo_manager("clear")
+            if any(k in text for k in ["done", "complete", "ho gaya"]):
+                m = re.search(r"(\d+)", text)
+                task_id = m.group(1) if m else None
+                return AdvancedCommands.todo_manager("done", task_id)
+
+        # ── Pomodoro ──────────────────────────────────────────────────────────
+        if "pomodoro" in text or "focus mode" in text:
+            resp = AdvancedCommands.start_pomodoro()
+            TimerCommands.set_timer(25 * 60, "Pomodoro Break", on_fire=lambda msg: print(f"[POMODORO] {msg}"))
+            return resp
+
+        # ── Clipboard ─────────────────────────────────────────────────────────
+        if "clipboard" in text:
+            if "get" in text or "batao" in text or "check" in text:
+                return AdvancedCommands.clipboard_action("get")
+            if "set" in text or "copy" in text:
+                content = re.sub(r"(set clipboard|copy to clipboard|copy|clipboard|ko)", "", text).strip()
+                return AdvancedCommands.clipboard_action("set", content)
+
+        # ── Window Management ─────────────────────────────────────────────────
+        if "window" in text or "bara karo" in text or "chota karo" in text or "band karo" in text:
+            if "maximize" in text or "bara karo" in text:
+                return AdvancedCommands.window_control("maximize")
+            if "minimize all" in text or "screen saaf karo" in text:
+                return AdvancedCommands.window_control("minimize_all")
+            if "minimize" in text or "chota karo" in text:
+                return AdvancedCommands.window_control("minimize")
+            if "close" in text or "band karo" in text:
+                # Avoid closing shadow if they just say "close"
+                if not any(k in text for k in ["shadow", "yourself"]):
+                    return AdvancedCommands.window_control("close")
 
         # ── Time ──────────────────────────────────────────────────────────────
         if any(k in text for k in ["time", "clock", "what time", "waqt batao", "time batao"]):
@@ -357,6 +485,8 @@ class CommandDispatcher:
 
         # ── Quote ─────────────────────────────────────────────────────────────
         if any(k in text for k in ["quote", "aqwal", "motivation"]):
+            if "motivat" in text:
+                return AdvancedCommands.get_motivation()
             return ProductivityCommands.get_quote()
 
         # ── Trash ─────────────────────────────────────────────────────────────
@@ -498,6 +628,20 @@ class CommandDispatcher:
         # ── News headlines ───────────────────────────────────────────────────
         if any(k in text for k in ["news", "headlines", "what's happening"]):
             return NewsCommands.headlines()
+
+        # ── Translation ───────────────────────────────────────────────────────
+        if "translate" in text or "urdu mein" in text or "english mein" in text:
+            target = 'ur' if 'urdu' in text else 'en'
+            content = re.sub(r"(translate|to urdu|to english|urdu mein|english mein|karo|batao)", "", text).strip()
+            if content:
+                return AdvancedCommands.translate_text(content, target)
+            return "Bataiye kya translate karna hai?"
+
+        # ── Close Specific App ────────────────────────────────────────────────
+        if "close" in text and not any(k in text for k in ["close shadow", "close yourself", "pc band karo"]):
+            app_to_close = re.sub(r"(close|band karo|ko)", "", text).strip()
+            if app_to_close:
+                return AdvancedCommands.close_app(app_to_close)
 
         # ── AI Fallback ───────────────────────────────────────────────────────
         print("[DISPATCH] No local match → AI fallback")

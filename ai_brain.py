@@ -2,6 +2,7 @@ import openai
 import time
 from config_manager import config_manager
 import re
+import base64
 from memory_manager import memory_manager
 
 # Hard caps for AI calls — keep the assistant snappy and prevent it from
@@ -173,6 +174,45 @@ class AIBrain:
         except Exception as e:
             print(f"[AI] Code Gen Error: {e}")
             return None
+
+    def analyze_image(self, image_path, prompt="Describe what you see on the screen."):
+        """Analyzes an image using a vision-capable model."""
+        if not self.openrouter_key and not self.openai_key:
+            return "API Key required for vision analysis."
+            
+        try:
+            with open(image_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            system_msg = "You are a vision-capable AI assistant. Analyze the provided image and answer the user's question concisely in Urdu."
+            
+            # Note: Many OpenRouter models support vision (e.g. Gemini, GPT-4o)
+            # We use the same model but include the image in the message payload.
+            if not self.is_legacy and self.client:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_msg},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{base64_image}"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=500
+                )
+                return response.choices[0].message.content.strip()
+            return "Vision analysis requires a modern OpenAI SDK version."
+        except Exception as e:
+            print(f"[AI] Vision Error: {e}")
+            return f"I couldn't analyze the screen: {e}"
 
 # Singleton
 ai_brain = AIBrain()
