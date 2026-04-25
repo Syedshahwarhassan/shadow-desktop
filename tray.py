@@ -40,8 +40,19 @@ class TrayIcon:
         print("Settings not implemented yet")
 
     def _restart(self):
-        # Basic restart logic
-        pass
+        import sys
+        import subprocess
+        self.icon.stop()
+        self.app.quit()
+        # Restarts the application whether it's a script or an executable
+        if getattr(sys, 'frozen', False):
+            # Running as compiled PyInstaller executable
+            args = [sys.executable] + sys.argv[1:]
+        else:
+            # Running as a Python script
+            args = [sys.executable] + sys.argv
+        subprocess.Popen(args)
+        sys.exit()
 
     def _exit(self):
         self.icon.stop()

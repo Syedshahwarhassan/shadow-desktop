@@ -3,7 +3,13 @@ import os
 
 class MemoryManager:
     def __init__(self, memory_file="memory.json"):
-        self.memory_file = memory_file
+        import sys
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        self.memory_file = os.path.join(base_dir, memory_file)
         self.memory = self.load_memory()
 
     def load_memory(self):

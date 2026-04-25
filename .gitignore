@@ -4,3 +4,7 @@ memory.json
 *.ps1
 config.json
 temp.mp3
+build_exe.bat
+AntiGravity.spec
+build
+dist
