@@ -1,6 +1,5 @@
 import os
 import webbrowser
-import pywhatkit
 import pyautogui
 
 class MediaCommands:
@@ -11,6 +10,7 @@ class MediaCommands:
             return "What should I play on YouTube?"
         try:
             print(f"[MEDIA] YouTube Play: {query}")
+            import pywhatkit
             pywhatkit.playonyt(query)
             return f"Playing {query} on YouTube."
         except Exception as e:

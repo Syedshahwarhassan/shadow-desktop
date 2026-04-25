@@ -66,6 +66,9 @@ URDU_MAP = {
     "play karo":    "play",
     "gana sunao":   "play",
     "geet sunao":   "play",
+    "suna do":      "play",
+    "sunao":        "play",
+    "bajao":        "play",
     # Scroll
     "neeche":       "scroll down",
     "upar":         "scroll up",
@@ -219,18 +222,20 @@ class CommandDispatcher:
             return MediaCommands.scroll(direction)
 
         if "youtube" in text and "play" in text:
-            song = text.replace("youtube", "").replace("play", "").replace("par", "").strip()
+            song = text.replace("youtube", "").replace("play", "").replace("par", "").replace("pe", "").strip()
             return MediaCommands.play_on_youtube(song)
 
         if "spotify" in text and "play" in text:
-            song = text.replace("spotify", "").replace("play", "").replace("par", "").strip()
+            song = text.replace("spotify", "").replace("play", "").replace("par", "").replace("pe", "").strip()
             return MediaCommands.play_on_spotify(song)
 
-        # General play command (defaults to YouTube)
-        if text.startswith("play") or text.endswith("bajao") or text.endswith("sunao"):
-            song = text.replace("play", "").replace("bajao", "").replace("sunao", "").replace("gana", "").strip()
+        # General play command (defaults to YouTube for reliable auto-play)
+        if "play" in text or "gana" in text or "music" in text:
+            song = text.replace("play", "").replace("bajao", "").replace("sunao", "").replace("gana", "").replace("music", "").replace("koi", "").replace("sa", "").replace("achcha", "").strip()
             if song:
                 return MediaCommands.play_on_youtube(song)
+            else:
+                return "Kya play karun?"
 
         # ── Typing & Dictation ────────────────────────────────────────────────
         if any(k in text for k in ["dictation on", "start typing", "typing start", "likhna shuru karo", "type karna shuru karo", "لکھنا شروع کرو"]):
@@ -254,6 +259,13 @@ class CommandDispatcher:
         for s in shortcuts:
             if s in text:
                 return TypingCommands.keyboard_shortcut(s)
+
+        # ── Open folder (Search in D drive) ───────────────────────────────────
+        if any(k in text for k in ["open folder", "search folder", "folder kholo", "find folder", "folder open"]):
+            folder_name = re.sub(r"(please|open folder|search folder|folder kholo|find folder|folder open|named|called|naam ka|ko)", "", text).strip()
+            if folder_name:
+                return SystemCommands.search_and_open_folder(folder_name)
+            return "Kaun sa folder open karun?"
 
         # ── Open app ─────────────────────────────────────────────────────────
         # Matches: "open X", "launch X", "start X", "X open", "X chalao"
@@ -352,8 +364,46 @@ class CommandDispatcher:
 
         # ── Play ──────────────────────────────────────────────────────────────
         if "play" in text:
-            query = re.sub(r"(play on youtube|play karo|bajao|play)", "", text).strip()
-            return WebCommands.play_youtube(query)
+            query = re.sub(r"(play on spotify|play on youtube|play karo|bajao|play)", "", text).strip()
+            return MediaCommands.play_on_youtube(query)
+
+        # ── Project Starters ──────────────────────────────────────────────────
+        # Triggers: "create a react project named agency", "create next js project", "create net project"
+        if any(k in text for k in ["create", "make", "build", "start", "banao"]) and any(k in text for k in ["project", "app"]):
+            frameworks = ["react", "next js", "next", "vue", "angular", "svelte", "vite", "net", "dotnet", "django", "flask", "node", "express"]
+            found_framework = None
+            for fw in frameworks:
+                if fw in text:
+                    found_framework = fw
+                    break
+            
+            if found_framework:
+                # Extract project name
+                # Patterns: "named [name]", "name as [name]", "called [name]", "naam se [name]", "name [name]"
+                name_match = re.search(r"(?:named|name as|called|naam se|name|naam)\s+([a-zA-Z0-9_-]+)", text)
+                project_name = name_match.group(1) if name_match else "my-project"
+                
+                return DevCommands.create_project_starter(found_framework, project_name)
+
+        # ── AI Code Generation & Scaffolding ──────────────────────────────────
+        code_triggers = [
+            "code a ", "code me ", "write a script", "write a program", 
+            "create a program", "build a ", "generate code", 
+            "login page", "html page", "python script", "c++ program", "react app"
+        ]
+        # Check if they are asking to create/code something related to programming
+        if any(k in text for k in code_triggers) or (
+            any(k in text for k in ["create", "write", "make", "build"]) and 
+            any(lang in text for lang in ["html", "python", "c++", "cpp", "javascript", "js", "java", "css", "php", "script", "program", "app", "website"])
+        ):
+            # Avoid conflict with basic file/folder creation unless language is specified
+            is_basic_file = any(k in text for k in ["create file", "make file", "create folder", "make folder"])
+            has_lang = any(lang in text for lang in ["html", "python", "c++", "cpp", "javascript", "js", "java", "css", "php"])
+            
+            if is_basic_file and not has_lang:
+                pass # let other handlers or fallback deal with simple file creation
+            else:
+                return DevCommands.scaffold_project(raw_text)
 
         # ── Developer ─────────────────────────────────────────────────────────
         if any(k in text for k in ["git status", "git push", "git pull"]):

@@ -145,6 +145,8 @@ class SystemCommands:
             "word":              "winword",
             "excel":             "excel",
             "powerpoint":        "powerpnt",
+            "antigravity":       "antigravity",
+            "anti gravity":      "antigravity"
         }
 
         # Check web apps
@@ -192,3 +194,26 @@ class SystemCommands:
         print(f"[CMD] Opening File Explorer: {target}")
         subprocess.Popen(f"explorer {target}", shell=True)
         return f"Opening File Explorer."
+
+    @staticmethod
+    def search_and_open_folder(folder_name):
+        print(f"[CMD] Searching for folder '{folder_name}' in D: drive...")
+        folder_name = folder_name.strip()
+        
+        try:
+            # Fast search using cmd 'dir'
+            command = f'dir "D:\\*{folder_name}*" /A:D /S /B'
+            result = subprocess.run(command, shell=True, capture_output=True, text=True)
+            
+            if result.stdout:
+                # Get the first match
+                first_match = result.stdout.strip().split('\n')[0].strip()
+                if os.path.exists(first_match):
+                    print(f"[CMD] Found: {first_match}")
+                    subprocess.Popen(f'explorer "{first_match}"', shell=True)
+                    return f"Opening folder {os.path.basename(first_match)}."
+            
+            return f"I couldn't find a folder named {folder_name} in your D drive."
+        except Exception as e:
+            print(f"[ERR] Search folder: {e}")
+            return "An error occurred while searching for the folder."

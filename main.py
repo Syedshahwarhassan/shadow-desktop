@@ -55,8 +55,7 @@ class AntiGravityApp:
         self.stats_timer.start(1500)  # snappier HUD refresh (was 2000ms)
 
         self.hud.show()
-        name = config_manager.get('assistant_name', 'Shadow')
-        tts_engine.speak(f"{name} online. All systems operational.")
+        tts_engine.speak("System online. All systems operational.")
         self.listener.start()
 
     def update_stats(self):

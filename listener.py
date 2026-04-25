@@ -19,6 +19,7 @@ class Listener:
         self.is_listening = False
         self._stop_fn     = None
         self._audio_queue = queue.Queue()
+        self.session_active_until = 0
         
         # Session tracking removed
 
@@ -78,14 +79,27 @@ class Listener:
             matched_wake = self._find_wake(text_en, text_ur, wake_word)
 
             if matched_wake:
+                # Interrupt any ongoing TTS speech immediately
+                from tts import tts_engine
+                tts_engine.stop()
+
                 print(f"[STT] Heard: {raw_text}")
                 parts = matched_wake.split(wake_word, 1)
                 command = parts[1].strip() if len(parts) > 1 else ""
 
                 if command:
+                    self.session_active_until = 0
                     self.callback(command)
                 else:
+                    self.session_active_until = time.time() + 8.0
                     self.callback("_WAKE_")
+            elif time.time() < self.session_active_until:
+                print(f"[STT] Heard (In Session): {raw_text}")
+                from tts import tts_engine
+                tts_engine.stop()
+                
+                self.session_active_until = 0
+                self.callback(raw_text)
 
     def _find_wake(self, text_en, text_ur, wake_word):
         for text in [text_en, text_ur]:

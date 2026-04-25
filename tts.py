@@ -3,6 +3,8 @@ import queue
 import subprocess
 import os
 import re
+import asyncio
+import edge_tts
 from config_manager import config_manager
 
 class TTSEngine:
@@ -13,6 +15,8 @@ class TTSEngine:
     """
     def __init__(self):
         self._queue = queue.Queue()
+        self._current_ps_process = None
+        self._stop_flag = False
         self._worker_thread = threading.Thread(target=self._worker, daemon=True)
         self._worker_thread.start()
 
@@ -23,38 +27,44 @@ class TTSEngine:
             clean_text = clean_text.replace("[", "").replace("]", "")
             self._queue.put(clean_text)
 
-    def _worker(self):
-        # Check config to see if we should force PowerShell
-        force_ps = config_manager.get("voice.force_powershell", True) # Default to True for reliability
+    def stop(self):
+        """Immediately stops speech and clears the queue."""
+        self._stop_flag = True
         
-        engine = None
-        if not force_ps:
+        # Clear the queue
+        with self._queue.mutex:
+            self._queue.queue.clear()
+        
+        # Terminate any running PowerShell process
+        if self._current_ps_process:
             try:
-                import pyttsx3
-                import pythoncom
-                pythoncom.CoInitialize()
-                engine = pyttsx3.init()
-                self._setup_pyttsx(engine)
-                print("[TTS] pyttsx3 initialized.")
-            except Exception as e:
-                print(f"[TTS] pyttsx3 init failed: {e}. Falling back to PowerShell.")
-                engine = None
+                self._current_ps_process.kill()
+            except:
+                pass
 
+        # Stop pygame audio if it's playing
+        try:
+            import pygame
+            if pygame.mixer.get_init():
+                pygame.mixer.music.stop()
+        except:
+            pass
+
+
+    def _worker(self):
         while True:
             text = self._queue.get()
             if text is None: break
             
+            self._stop_flag = False
+            
             print(f"[TTS] Speaking: {text[:50]}...")
             
-            if force_ps or engine is None:
+            try:
+                self._speak_edge(text)
+            except Exception as e:
+                print(f"[TTS] edge-tts error: {e}. Using PowerShell fallback.")
                 self._speak_powershell(text)
-            else:
-                try:
-                    engine.say(text)
-                    engine.runAndWait()
-                except Exception as e:
-                    print(f"[TTS] pyttsx3 error: {e}. Using PowerShell fallback.")
-                    self._speak_powershell(text)
 
     def _setup_pyttsx(self, engine):
         voices = engine.getProperty('voices')
@@ -79,6 +89,49 @@ class TTSEngine:
         
         engine.setProperty('rate', rate)
         engine.setProperty('volume', volume)
+
+    def _speak_edge(self, text):
+        async def run():
+            # Adjust pitch and rate to inject "feeling" into the voice
+            pitch = "+0Hz"
+            rate = "-10%"  # Default rate
+            
+            # Simple emotive heuristics for Urdu/Bilingual
+            if "!" in text or any(w in text.lower() for w in ["واہ", "زبردست", "ہاہا", "ارے", "بہت خوب", "haha", "wow", "yay"]):
+                pitch = "+15Hz"  # Higher pitch for excitement
+                rate = "-5%"     # Slightly faster
+            elif "?" in text or any(w in text for w in ["کیا ", "کیوں ", "کیسے ", "کب "]):
+                pitch = "+5Hz"   # Slight pitch raise for curiosity/questions
+            elif any(w in text.lower() for w in ["معاف", "افسوس", "سوری", "sorry", "sad", "غلطی", "اوہ"]):
+                pitch = "-15Hz"  # Lower pitch for sadness/apology
+                rate = "-20%"    # Slower speech
+                
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice="ur-PK-UzmaNeural",  # real Pakistani female
+                rate=rate,
+                pitch=pitch
+            )
+            await communicate.save("temp.mp3")
+
+        asyncio.run(run())
+
+        if self._stop_flag:
+            return
+
+        # play audio
+        import pygame
+        pygame.mixer.init()
+        pygame.mixer.music.load("temp.mp3")
+        pygame.mixer.music.play()
+        
+        # Wait for the audio to finish playing, otherwise the TTS engine 
+        # will immediately overwrite temp.mp3 for the next sentence
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)
+            
+        # Unload to free the file handle so edge-tts can overwrite it next time
+        pygame.mixer.music.unload()
 
     def _speak_powershell(self, text):
         """
@@ -117,15 +170,19 @@ class TTSEngine:
         ]
         
         try:
-            # We use check=True to catch errors
-            subprocess.run(command, 
-                           creationflags=subprocess.CREATE_NO_WINDOW,
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.PIPE,
-                           text=True,
-                           timeout=30)
+            # Use Popen so we can kill the process if interrupted
+            self._current_ps_process = subprocess.Popen(
+                command, 
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            self._current_ps_process.wait(timeout=30)
         except Exception as e:
             print(f"[TTS] PowerShell Error: {e}")
+        finally:
+            self._current_ps_process = None
 
 # Global instance
 tts_engine = TTSEngine()
