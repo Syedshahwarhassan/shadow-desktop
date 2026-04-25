@@ -1,14 +1,10 @@
 import sys
 import os
 
-class DevNull:
-    def write(self, msg): pass
-    def flush(self): pass
-
 # Force UTF-8 output so emoji/unicode prints don't crash on Windows console
 # If running without a console (PyInstaller --noconsole), sys.stdout/stderr will be None.
 if sys.stdout is None:
-    sys.stdout = DevNull()
+    sys.stdout = open(os.devnull, 'w')
 elif getattr(sys.stdout, 'encoding', '') != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -16,7 +12,7 @@ elif getattr(sys.stdout, 'encoding', '') != 'utf-8':
         pass
 
 if sys.stderr is None:
-    sys.stderr = DevNull()
+    sys.stderr = open(os.devnull, 'w')
 elif getattr(sys.stderr, 'encoding', '') != 'utf-8':
     try:
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')

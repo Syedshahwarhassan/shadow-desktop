@@ -2,7 +2,6 @@ import os
 import shutil
 import socket
 import requests
-import speedtest
 import psutil
 import datetime
 import pyautogui
@@ -24,6 +23,7 @@ class AdvancedCommands:
     @staticmethod
     def run_speed_test():
         try:
+            import speedtest
             print("[CMD] Running speed test...")
             st = speedtest.Speedtest()
             st.get_best_server()
