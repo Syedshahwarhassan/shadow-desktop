@@ -49,9 +49,6 @@ class Listener:
         # Thread pool reused across all recognition tasks
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="stt")
 
-        # Prevents concurrent Google API calls from piling up
-        self._recognizer_lock = threading.Lock()
-
         self.recognizer.energy_threshold         = 250
         self.recognizer.dynamic_energy_threshold = False
         self.recognizer.pause_threshold          = 0.5
@@ -85,6 +82,10 @@ class Listener:
     # ── Internal pipeline ─────────────────────────────────────────────────────
 
     def _audio_callback(self, recognizer, audio) -> None:
+        # Drop audio while TTS is speaking — avoids picking up own voice
+        # and prevents queue buildup during AI responses.
+        if tts_engine.is_speaking:
+            return
         self._audio_queue.put(audio)
 
     def _process_loop(self) -> None:
@@ -94,10 +95,19 @@ class Listener:
             except queue.Empty:
                 continue
 
-            # Drop backlog if queue is growing (user not listening right now)
+            # Skip backlog
             if self._audio_queue.qsize() > 3:
                 print("[LISTENER] Queue backlog — dropping stale audio")
                 continue
+
+            # If TTS just finished speaking, drain any residual chunks captured
+            # during playback (microphone bleed-through).
+            if not tts_engine.is_speaking and self._audio_queue.qsize() > 1:
+                try:
+                    while self._audio_queue.qsize() > 1:
+                        self._audio_queue.get_nowait()
+                except Exception:
+                    pass
 
             text_en, text_ur = self._recognize_parallel(audio)
             raw_text = text_en if text_en else text_ur
@@ -158,16 +168,15 @@ class Listener:
         done = threading.Event()
 
         def _recog(lang: str, key: str) -> None:
-            with self._recognizer_lock:
-                try:
-                    results[key] = self.recognizer.recognize_google(
-                        audio, language=lang
-                    ).lower()
-                except Exception:
-                    pass
-                finally:
-                    if results[key]:
-                        done.set()
+            try:
+                results[key] = self.recognizer.recognize_google(
+                    audio, language=lang
+                ).lower()
+            except Exception:
+                pass
+            finally:
+                if results[key]:
+                    done.set()
 
         fut_en = self._pool.submit(_recog, "en-US", "en")
         fut_ur = self._pool.submit(_recog, "ur-PK", "ur")

@@ -22,7 +22,6 @@ import subprocess
 import os
 import re
 import asyncio
-import itertools
 import edge_tts
 import pyttsx3
 import pygame
@@ -67,9 +66,8 @@ def _extract_emotion(text: str) -> tuple[dict[str, str], str]:
     return {"pitch": pitch, "rate": rate}, text
 
 
-# ── Dual rotating temp buffers ────────────────────────────────────────────────
-_TEMP_FILES   = ["temp_0.mp3", "temp_1.mp3"]
-_buffer_cycle = itertools.cycle(range(len(_TEMP_FILES)))
+# ── Single temp file — TTS worker is single-threaded, no race condition
+_TEMP_FILE = "temp.mp3"
 
 
 class TTSEngine:
@@ -83,6 +81,7 @@ class TTSEngine:
         self._queue:   queue.Queue[str | None] = queue.Queue()
         self._stop_evt = threading.Event()
         self._current_ps_process: subprocess.Popen | None = None
+        self.is_speaking: bool = False   # readable by listener to mute itself
 
         # ── pygame mixer (initialised once) ───────────────────────────────────
         try:
@@ -124,6 +123,7 @@ class TTSEngine:
     def stop(self) -> None:
         """Interrupt current speech and flush the queue."""
         self._stop_evt.set()
+        self.is_speaking = False
 
         # Drain queue without blocking
         try:
@@ -160,6 +160,7 @@ class TTSEngine:
                 break
 
             self._stop_evt.clear()
+            self.is_speaking = True
             print(f"[TTS] Speaking: {text[:60]}{'...' if len(text) > 60 else ''}")
 
             try:
@@ -171,6 +172,10 @@ class TTSEngine:
                 except Exception as py_err:
                     print(f"[TTS] pyttsx3 error: {py_err} — using PowerShell")
                     self._speak_powershell(text)
+            finally:
+                # Mark not-speaking only if queue is now empty
+                if self._queue.empty():
+                    self.is_speaking = False
 
     def _setup_pyttsx(self, engine: pyttsx3.Engine) -> None:
         voices  = engine.getProperty("voices")
@@ -196,8 +201,6 @@ class TTSEngine:
 
     def _speak_edge(self, text: str) -> None:
         params, clean = _extract_emotion(text)
-        buf_idx  = next(_buffer_cycle)
-        tmp_path = _TEMP_FILES[buf_idx]
 
         async def _synthesise():
             comm = edge_tts.Communicate(
@@ -206,7 +209,7 @@ class TTSEngine:
                 rate=params["rate"],
                 pitch=params["pitch"],
             )
-            await comm.save(tmp_path)
+            await comm.save(_TEMP_FILE)
 
         # Post to persistent loop — no new event loop created
         future = asyncio.run_coroutine_threadsafe(_synthesise(), self._loop)
@@ -218,7 +221,7 @@ class TTSEngine:
         if not self._channel or not pygame.mixer.get_init():
             raise RuntimeError("pygame mixer unavailable")
 
-        sound = pygame.mixer.Sound(tmp_path)
+        sound = pygame.mixer.Sound(_TEMP_FILE)
         self._channel.play(sound)
 
         # Poll with stop-event awareness
