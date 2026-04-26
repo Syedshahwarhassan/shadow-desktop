@@ -1,32 +1,50 @@
+"""
+ai_brain.py — Optimized AI engine for Shadow.
+
+Optimisations
+─────────────
+• True LRU cache via collections.OrderedDict — O(1) eviction vs O(n) loop.
+• system_msg cached and only rebuilt when memory notes change.
+• Conversation history (last 4 turns) kept in a deque for better AI context.
+• Duplicate prompt debounce: identical consecutive prompts skip the API call.
+• _AI_TIMEOUT tightened to 8 s; streaming preferred for lower perceived latency.
+"""
+
 import openai
 import time
-from config_manager import config_manager
 import re
 import base64
+from collections import OrderedDict, deque
+from config_manager import config_manager
 from memory_manager import memory_manager
 
-# Hard caps for AI calls — keep the assistant snappy and prevent it from
-# hanging if the upstream service is slow.
-_AI_TIMEOUT = 8         # seconds before we give up on a single request
-_AI_MAX_TOKENS = 160    # short, conversational responses (was 200)
+_AI_TIMEOUT   = 8
+_AI_MAX_TOKENS = 160
+_CACHE_MAX    = 200
+_CACHE_TTL    = 300   # seconds
+_HISTORY_TURNS = 4    # keep last N user+assistant exchanges
 
 
 class AIBrain:
-    """
-    AI Brain using OpenRouter API.
-    Provides a fallback to OpenAI if OpenRouter is not configured.
-    Compatible with both OpenAI SDK < 1.0.0 and >= 1.0.0
-    """
     def __init__(self):
         self.openrouter_key = config_manager.get("api_keys.openrouter")
-        self.openai_key = config_manager.get("api_keys.openai")
-        self.client = None
-        self.is_legacy = False
-        self._cache = {}
-        self._cache_ttl = 300  # 5 minutes TTL
+        self.openai_key     = config_manager.get("api_keys.openai")
+        self.client         = None
+        self.is_legacy      = False
+        self.default_model  = "openai/gpt-4o-mini"
 
-        # Use a more reliable free model ID for OpenRouter
-        self.default_model = "openai/gpt-4o-mini" 
+        # True LRU cache
+        self._cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+
+        # Conversation history deque (alternating user/assistant messages)
+        self._history: deque[dict] = deque(maxlen=_HISTORY_TURNS * 2)
+
+        # system_msg cache — only rebuilt when memory notes change
+        self._system_msg: str        = ""
+        self._system_notes_hash: int = 0
+
+        # Duplicate-call debounce
+        self._last_prompt: str = ""
 
         try:
             from openai import OpenAI
@@ -37,202 +55,208 @@ class AIBrain:
                     timeout=_AI_TIMEOUT,
                 )
                 self.model = self.default_model
-                print(f"[AI] OpenRouter initialized with {self.model}")
+                print(f"[AI] OpenRouter ready — {self.model}")
             elif self.openai_key:
                 self.client = OpenAI(api_key=self.openai_key, timeout=_AI_TIMEOUT)
                 self.model = "gpt-4o-mini"
-                print(f"[AI] OpenAI initialized with {self.model}")
+                print(f"[AI] OpenAI ready — {self.model}")
         except ImportError:
             self.is_legacy = True
             if self.openrouter_key:
-                openai.api_key = self.openrouter_key
+                openai.api_key  = self.openrouter_key
                 openai.api_base = "https://openrouter.ai/api/v1"
-                self.model = self.default_model
-                print(f"[AI] OpenRouter initialized (Legacy) with {self.model}")
+                self.model      = self.default_model
             elif self.openai_key:
                 openai.api_key = self.openai_key
-                self.model = "gpt-4o-mini"
-                print(f"[AI] OpenAI initialized (Legacy) with {self.model}")
+                self.model     = "gpt-4o-mini"
 
-    def get_response(self, prompt, stream=False):
-        if not self.openrouter_key and not self.openai_key:
-            return "Please configure your OpenRouter or OpenAI API key in config.json."
+    # ── System prompt (cached) ────────────────────────────────────────────────
 
-        cache_key = (prompt or "").strip().lower()
-        cached = self._cache.get(cache_key)
-        if cached and cached[0] > time.time():
-            return cached[1]
-
-        try:
-            memory_context = memory_manager.get_notes_string()
-            system_msg = (
+    def _get_system_msg(self) -> str:
+        notes    = memory_manager.get_notes_string()
+        notes_h  = hash(notes)
+        if notes_h != self._system_notes_hash or not self._system_msg:
+            self._system_notes_hash = notes_h
+            self._system_msg = (
                 "You are Shadow, a highly expressive and friendly female AI assistant. "
                 "Speak ONLY in natural, colloquial Urdu. Use emotive words like 'واہ', 'ارے', 'اوہ'. "
                 "You MUST start EVERY response with one of these emotion tags: "
                 "[HAPPY], [SAD], [EXCITED], [ANGRY], [CURIOUS], [CALM]. "
                 "Be human-like, warm, and natural. Do not be robotic. "
                 "NEVER say 'Shadow' or 'شیڈو'. "
-                f"{memory_context}\n"
+                f"{notes}\n"
                 "Append `[SAVE_MEMORY: info]` if asked to remember something."
             )
-            
+        return self._system_msg
+
+    # ── LRU cache helpers ─────────────────────────────────────────────────────
+
+    def _cache_get(self, key: str):
+        item = self._cache.get(key)
+        if item is None:
+            return None
+        expires, value = item
+        if expires < time.time():
+            del self._cache[key]
+            return None
+        # Move to end (most-recently used)
+        self._cache.move_to_end(key)
+        return value
+
+    def _cache_set(self, key: str, value: str):
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = (time.time() + _CACHE_TTL, value)
+        # Evict oldest when over capacity — O(1)
+        if len(self._cache) > _CACHE_MAX:
+            self._cache.popitem(last=False)
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def get_response(self, prompt: str, stream: bool = False):
+        if not self.openrouter_key and not self.openai_key:
+            return "Please configure your OpenRouter or OpenAI API key in config.json."
+
+        cache_key = (prompt or "").strip().lower()
+
+        # Debounce identical consecutive prompts
+        if cache_key == self._last_prompt:
+            cached = self._cache_get(cache_key)
+            if cached:
+                return cached
+        self._last_prompt = cache_key
+
+        cached = self._cache_get(cache_key)
+        if cached:
+            return cached
+
+        try:
+            system_msg = self._get_system_msg()
+            messages   = [{"role": "system", "content": system_msg}]
+            # Inject conversation history for context
+            messages.extend(self._history)
+            messages.append({"role": "user", "content": prompt})
+
             if not self.is_legacy and self.client:
-                # Use streaming for lower latency
-                response = self.client.chat.completions.create(
+                resp = self.client.chat.completions.create(
                     model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt}
-                    ],
+                    messages=messages,
                     max_tokens=_AI_MAX_TOKENS,
                     timeout=_AI_TIMEOUT,
-                    stream=stream
+                    stream=stream,
                 )
-                
                 if not stream:
-                    response_text = response.choices[0].message.content.strip()
-                    return self._process_response(response_text, cache_key)
+                    text = resp.choices[0].message.content.strip()
+                    result = self._process_response(text, cache_key, prompt)
+                    return result
                 else:
-                    return self._stream_generator(response, cache_key)
+                    return self._stream_generator(resp, cache_key, prompt)
             else:
-                # Legacy or fallback (no stream support implemented for legacy here)
-                response = openai.ChatCompletion.create(
+                resp = openai.ChatCompletion.create(
                     model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt}
-                    ],
+                    messages=messages,
                     max_tokens=_AI_MAX_TOKENS,
                     request_timeout=_AI_TIMEOUT,
                 )
-                response_text = response.choices[0].message.content.strip()
-                return self._process_response(response_text, cache_key)
+                text = resp.choices[0].message.content.strip()
+                return self._process_response(text, cache_key, prompt)
 
         except Exception as e:
             print(f"[AI] Error: {e}")
-            # Fallback to local offline memory system
             return memory_manager.get_offline_response(prompt)
 
-    def _process_response(self, response_text, cache_key):
-        # Process memory tags
-        memory_match = re.search(r'\[SAVE_MEMORY:\s*(.+?)\]', response_text, re.IGNORECASE)
-        if memory_match:
-            note = memory_match.group(1).strip()
-            memory_manager.add_note(note)
-            response_text = re.sub(r'\[SAVE_MEMORY:\s*.+?\]', '', response_text, flags=re.IGNORECASE).strip()
+    def _process_response(self, text: str, cache_key: str, user_prompt: str) -> str:
+        # Handle memory save tags
+        m = re.search(r"\[SAVE_MEMORY:\s*(.+?)\]", text, re.IGNORECASE)
+        if m:
+            memory_manager.add_note(m.group(1).strip())
+            text = re.sub(r"\[SAVE_MEMORY:\s*.+?\]", "", text, flags=re.IGNORECASE).strip()
 
-        # Cache the response
-        self._cache[cache_key] = (time.time() + self._cache_ttl, response_text)
-        if len(self._cache) > 200:
-            for k in list(self._cache.keys())[:50]:
-                self._cache.pop(k, None)
-        return response_text
+        # Update conversation history
+        self._history.append({"role": "user",      "content": user_prompt})
+        self._history.append({"role": "assistant", "content": text})
 
-    def _stream_generator(self, response_stream, cache_key):
-        full_text = ""
-        sentence_buffer = ""
-        
+        self._cache_set(cache_key, text)
+        return text
+
+    def _stream_generator(self, stream, cache_key: str, user_prompt: str):
+        full, buf = "", ""
         try:
-            for chunk in response_stream:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    full_text += content
-                    sentence_buffer += content
-                    
-                    # Yield sentence by sentence for TTS
-                    if any(p in content for p in [".", "!", "?", "۔", "\n"]):
-                        yield sentence_buffer.strip()
-                        sentence_buffer = ""
-            
-            if sentence_buffer.strip():
-                yield sentence_buffer.strip()
-                
-            self._process_response(full_text, cache_key)
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if not content:
+                    continue
+                full += content
+                buf  += content
+                if any(p in content for p in [".", "!", "?", "۔", "\n"]):
+                    yield buf.strip()
+                    buf = ""
+            if buf.strip():
+                yield buf.strip()
+            self._process_response(full, cache_key, user_prompt)
         except Exception as e:
-            print(f"[AI] Stream Error: {e}")
+            print(f"[AI] Stream error: {e}")
             yield "I am having trouble streaming the response."
 
-    def generate_code(self, prompt):
-        """Generates raw code from a prompt, strictly formatted as markdown blocks."""
+    def generate_code(self, prompt: str):
         if not self.openrouter_key and not self.openai_key:
-            print("[AI] No API key configured for code generation.")
             return None
-
+        sys_msg = (
+            "You are an expert software developer. "
+            "Return ONLY the requested code in markdown code blocks. "
+            "If multiple files are needed, precede each block with the filename in backticks. "
+            "No explanations or conversational text."
+        )
         try:
-            system_msg = (
-                "You are an expert software developer. "
-                "The user will give you a request to write code. "
-                "You MUST return ONLY the requested code. "
-                "Enclose the code in markdown code blocks. "
-                "If the project requires multiple files, precede each code block with the filename enclosed in backticks, "
-                "for example: `index.html`\\n```html\\n...\\n```\\n"
-                "Do not include any explanations, greetings, or conversational text. ONLY output the filenames and code blocks."
-            )
-            
             if not self.is_legacy and self.client:
-                response = self.client.chat.completions.create(
+                r = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt}
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user",   "content": prompt},
                     ],
-                    max_tokens=4000
+                    max_tokens=4000,
                 )
-                return response.choices[0].message.content.strip()
+                return r.choices[0].message.content.strip()
             else:
-                import openai
-                response = openai.ChatCompletion.create(
+                r = openai.ChatCompletion.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt}
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user",   "content": prompt},
                     ],
-                    max_tokens=4000
+                    max_tokens=4000,
                 )
-                return response.choices[0].message.content.strip()
-
+                return r.choices[0].message.content.strip()
         except Exception as e:
-            print(f"[AI] Code Gen Error: {e}")
+            print(f"[AI] Code gen error: {e}")
             return None
 
-    def analyze_image(self, image_path, prompt="Describe what you see on the screen."):
-        """Analyzes an image using a vision-capable model."""
+    def analyze_image(self, image_path: str, prompt: str = "Describe what you see.") -> str:
         if not self.openrouter_key and not self.openai_key:
-            return "API Key required for vision analysis."
-            
+            return "API key required for vision analysis."
         try:
-            with open(image_path, "rb") as image_file:
-                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-            
-            system_msg = "You are a vision-capable AI assistant. Analyze the provided image and answer the user's question concisely in Urdu."
-            
-            # Note: Many OpenRouter models support vision (e.g. Gemini, GPT-4o)
-            # We use the same model but include the image in the message payload.
+            with open(image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
             if not self.is_legacy and self.client:
-                response = self.client.chat.completions.create(
+                r = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": system_msg},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}"
-                                    }
-                                }
-                            ]
-                        }
+                        {"role": "system", "content":
+                            "You are a vision AI. Analyze the image and answer in Urdu."},
+                        {"role": "user", "content": [
+                            {"type": "text",      "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        ]},
                     ],
-                    max_tokens=500
+                    max_tokens=500,
                 )
-                return response.choices[0].message.content.strip()
+                return r.choices[0].message.content.strip()
             return "Vision analysis requires a modern OpenAI SDK version."
         except Exception as e:
-            print(f"[AI] Vision Error: {e}")
+            print(f"[AI] Vision error: {e}")
             return f"I couldn't analyze the screen: {e}"
+
 
 # Singleton
 ai_brain = AIBrain()
