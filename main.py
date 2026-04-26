@@ -37,6 +37,7 @@ class VoiceSignal(QObject):
     command_received = pyqtSignal(str)
     response_ready = pyqtSignal(str)
     status_update = pyqtSignal(str)
+    settings_requested = pyqtSignal()
 
 class AntiGravityApp:
     def __init__(self):
@@ -50,12 +51,14 @@ class AntiGravityApp:
         self.signals.command_received.connect(self.handle_command)
         self.signals.response_ready.connect(self.finalize_response)
         self.signals.status_update.connect(self.hud.set_status)
+        self.signals.settings_requested.connect(self.settings.show)
 
         self.listener = Listener(self.signals.command_received.emit)
 
         self.tray = TrayIcon(self.hud, self.app)
         self.tray.start()
-        self.tray._open_settings = self.settings.show
+        self.tray._open_settings = self.signals.settings_requested.emit
+        self.hud._settings_callback = self.signals.settings_requested.emit
 
         # Warm psutil so the first non-blocking sample isn't 0%.
         psutil.cpu_percent(interval=None)

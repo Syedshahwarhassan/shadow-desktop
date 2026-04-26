@@ -194,6 +194,7 @@ def _fix_word_order(text):
         "chrome", "firefox", "edge", "notepad", "calculator", "file explorer",
         "explorer", "task manager", "vscode", "vs code", "steam", "netflix",
         "instagram", "facebook", "twitter", "gmail", "github", "chatgpt",
+        "settings", "setting",
     ]
     for app in known_apps:
         # Pattern: "<app> open" or "<app> launch" or "<app> start"
@@ -312,6 +313,11 @@ class CommandDispatcher:
             return SystemCommands.restart_self()
         if any(k in text for k in ["close yourself", "close shadow", "exit yourself", "quit yourself"]):
             return SystemCommands.close_self()
+
+        # ── Settings ──────────────────────────────────────────────────────────
+        if any(k in text for k in ["open settings", "open setting", "show settings", "show setting", "settings open", "setting open"]):
+            self.hud.open_settings()
+            return "Zaroor, settings open kar di hain."
 
         # Handle 'close' or 'stop' generally
         if any(k in text for k in ["close", "stop", "band karo"]):
