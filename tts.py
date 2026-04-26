@@ -173,8 +173,8 @@ class TTSEngine:
                     print(f"[TTS] pyttsx3 error: {py_err} — using PowerShell")
                     self._speak_powershell(text)
             finally:
-                # Mark not-speaking only if queue is now empty
-                if self._queue.empty():
+                # Ensure we reset speaking state if queue is empty or stop was requested
+                if self._queue.empty() or self._stop_evt.is_set():
                     self.is_speaking = False
 
     def _setup_pyttsx(self, engine: pyttsx3.Engine) -> None:

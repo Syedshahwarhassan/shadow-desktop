@@ -26,3 +26,7 @@ wmi
 sympy
 vosk
 wikipedia
+keyboard
+yagmail
+lxml
+premailer

@@ -158,10 +158,13 @@ class HUDWindow(QWidget):
 
         color = self.emotion_colors.get(self.current_emotion, QColor(0, 212, 255))
 
+        # 0. Background grid
+        self._draw_grid(painter, center, radius, color)
+
         # 1. Background glow
         glow = self._get_radial_grad("bg", center, radius, color, 0,
-                                     QColor(color.red(), color.green(), color.blue(), 40),
-                                     0.7, QColor(0, 0, 0, 0))
+                                     QColor(color.red(), color.green(), color.blue(), 60),
+                                     0.8, QColor(0, 0, 0, 0))
         painter.setBrush(glow)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(center, radius, radius)
@@ -193,6 +196,23 @@ class HUDWindow(QWidget):
             g.setColorAt(stop1_pos, stop1_col)
             self._grad_cache[cache_key] = g
         return self._grad_cache[cache_key]
+
+    def _draw_grid(self, painter, center, radius, color):
+        painter.save()
+        painter.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 30), 1))
+        step = 20
+        # Vertical lines
+        for x in range(0, int(self.width()), step):
+            painter.drawLine(x, 0, x, self.height())
+        # Horizontal lines
+        for y in range(0, int(self.height()), step):
+            painter.drawLine(0, y, self.width(), y)
+        
+        # Diagonal scanline effect
+        scan_y = (int(time.time() * 100) % int(self.height() * 2)) - self.height()
+        painter.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 15), 2))
+        painter.drawLine(0, scan_y, self.width(), scan_y + 50)
+        painter.restore()
 
     # ── Draw helpers ──────────────────────────────────────────────────────────
 

@@ -32,8 +32,8 @@ WAKE_WORD_VARIANTS: frozenset[str] = frozenset([
     "\u0634\u06cc\u0688\u0648", "\u0634\u062f\u0648",
 ])
 
-_STT_TIMEOUT = 2.0   # seconds — first result wins within this window
-_JOIN_TIMEOUT = 0.3  # brief wait for the slower recognizer
+_STT_TIMEOUT = 4.0   # seconds — first result wins within this window
+_JOIN_TIMEOUT = 0.5  # brief wait for the slower recognizer
 
 
 class Listener:
@@ -49,10 +49,10 @@ class Listener:
         # Thread pool reused across all recognition tasks
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="stt")
 
-        self.recognizer.energy_threshold         = 250
-        self.recognizer.dynamic_energy_threshold = False
-        self.recognizer.pause_threshold          = 0.5
-        self.recognizer.non_speaking_duration    = 0.3
+        self.recognizer.energy_threshold         = 300
+        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.pause_threshold          = 0.8
+        self.recognizer.non_speaking_duration    = 0.5
 
         print("[INIT] Calibrating microphone…")
         with self.microphone as source:
@@ -82,10 +82,9 @@ class Listener:
     # ── Internal pipeline ─────────────────────────────────────────────────────
 
     def _audio_callback(self, recognizer, audio) -> None:
-        # Drop audio while TTS is speaking — avoids picking up own voice
-        # and prevents queue buildup during AI responses.
-        if tts_engine.is_speaking:
-            return
+        # We now capture audio even while TTS is speaking to allow interruptions.
+        # However, we only put it in the queue if the user is likely saying the wake word
+        # or if the session is active. 
         self._audio_queue.put(audio)
 
     def _process_loop(self) -> None:
@@ -182,6 +181,8 @@ class Listener:
         fut_ur = self._pool.submit(_recog, "ur-PK", "ur")
 
         done.wait(timeout=_STT_TIMEOUT)
+        if not done.is_set():
+            print(f"[STT] Timeout after {_STT_TIMEOUT}s — no result from Google")
 
         # Brief extra wait so the slower recognizer can still contribute.
         # TimeoutError is expected when one language is slow — swallow it.

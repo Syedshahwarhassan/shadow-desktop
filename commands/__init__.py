@@ -42,10 +42,14 @@ URDU_MAP = {
     # Volume
     "awaaz":        "volume",
     "awaaz barhaao":"volume up",
+    "awaaz barhao":  "volume up",
     "awaaz kam karo":"volume down",
     "awaaz zyada":  "volume up",
+    "awaaz jyada":  "volume up",
     "awaaz thodi":  "volume down",
+    "awaaz kam":    "volume down",
     "volume barhaao":"volume up",
+    "volume barhao": "volume up",
     "volume kam karo":"volume down",
     # Brightness
     "roushni":      "brightness",
@@ -97,6 +101,7 @@ URDU_MAP = {
     # Note
     "note likho":   "take note",
     "note karo":    "take note",
+    "note banao":   "take note",
     "نوٹ لکھو":      "take note",
     # Time
     "waqt":         "time",
@@ -152,6 +157,7 @@ URDU_MAP = {
     "health check": "system health",
     # Productivity
     "kaam likho":   "add to do",
+    "task likho":   "add to do",
     "tasks dikhao": "list to do",
     "kaam ho gaya": "task done",
     "clipboard check": "get clipboard",
@@ -214,8 +220,12 @@ class CommandDispatcher:
         t = text.lower().strip()
         # Apply pre-sorted Urdu → English map (sorted once at module load).
         for urdu, english in _URDU_SORTED:
-            if urdu in t:  # cheap membership check before str.replace allocation
-                t = t.replace(urdu, english)
+            if urdu in t:  # cheap membership check
+                # Use word boundaries for small keywords to avoid partial matches
+                if len(urdu) <= 3:
+                    t = re.sub(rf"\b{re.escape(urdu)}\b", english, t)
+                else:
+                    t = t.replace(urdu, english)
         # Fix reversed Urdu word order
         t = _fix_word_order(t)
         return t
@@ -281,8 +291,8 @@ class CommandDispatcher:
             if m:
                 return AdvancedCommands.check_port(m.group(1))
 
-        # ── Volume ────────────────────────────────────────────────────────────
-        if any(k in text for k in ["volume", "awaaz"]):
+        # ── Volume & Mute ─────────────────────────────────────────────────────
+        if any(k in text for k in ["volume", "awaaz", "mute"]):
             if any(k in text for k in ["up", "increase", "zyada", "jyada", "barhaao", "more", "tez"]):
                 return SystemCommands.set_volume(10)
             if any(k in text for k in ["down", "decrease", "kam", "less", "thori"]):
@@ -319,26 +329,23 @@ class CommandDispatcher:
             self.hud.open_settings()
             return "Zaroor, settings open kar di hain."
 
-        # Handle 'close' or 'stop' generally
-        if any(k in text for k in ["close", "stop", "band karo"]):
-            return "Kaam rok diya gaya hai."
-
         # ── Media & Navigation ────────────────────────────────────────────────
         if "scroll" in text:
             direction = "up" if "up" in text else "down"
             return MediaCommands.scroll(direction)
 
         if "youtube" in text and "play" in text:
-            song = text.replace("youtube", "").replace("play", "").replace("par", "").replace("pe", "").strip()
+            song = re.sub(r"\b(youtube|play|pe|par|on)\b", "", text).strip()
             return MediaCommands.play_on_youtube(song)
 
         if "spotify" in text and "play" in text:
-            song = text.replace("spotify", "").replace("play", "").replace("par", "").replace("pe", "").strip()
+            song = re.sub(r"\b(spotify|play|pe|par|on)\b", "", text).strip()
             return MediaCommands.play_on_spotify(song)
 
         # General play command (defaults to YouTube for reliable auto-play)
         if "play" in text or "gana" in text or "music" in text:
-            song = text.replace("play", "").replace("bajao", "").replace("sunao", "").replace("gana", "").replace("music", "").replace("koi", "").replace("sa", "").replace("achcha", "").strip()
+            # Use regex to remove keywords with word boundaries
+            song = re.sub(r"\b(play|bajao|sunao|gana|music|koi|sa|achcha|pe|par|on)\b", "", text).strip()
             if song:
                 return MediaCommands.play_on_youtube(song)
             else:
@@ -430,7 +437,7 @@ class CommandDispatcher:
             return DesktopCommands.create_file(name)
 
         # ── Advanced Desktop / Cleaning ───────────────────────────────────────
-        if any(k in text for k in ["organize desktop", "desktop saaf karo", "safai karo", "desktop organize"]):
+        if re.search(r"organize\s+(?:my\s+)?desktop|desktop\s+saaf|safai\s+karo", text):
             import winshell
             desktop = winshell.desktop()
             return AdvancedCommands.organize_folder(desktop)
@@ -453,11 +460,8 @@ class CommandDispatcher:
             return DesktopCommands.screenshot()
 
         # ── Note ──────────────────────────────────────────────────────────────
-        if "note" in text:
-            note = re.sub(r"(take notes|take note|note down|note likho|note karo|note)", "", text).strip()
-            # If the user just says "s" from "take notes", ignore it
-            if note == "s" and text == "take notes":
-                note = ""
+        if re.search(r"\bnote\b", text):
+            note = re.sub(r"\b(take notes|take note|note down|note likho|note karo|note)\b", "", text).strip()
             if note:
                 return DesktopCommands.take_note(note)
             return "Kya note karna hai?"
@@ -504,7 +508,7 @@ class CommandDispatcher:
                     return AdvancedCommands.window_control("close")
 
         # ── Time ──────────────────────────────────────────────────────────────
-        if any(k in text for k in ["time", "clock", "what time", "waqt batao", "time batao"]):
+        if any(k in text for k in ["what time", "waqt batao", "time batao"]) or re.search(r"\btime\b", text):
             import time as _t
             return f"Abhi waqt hai {_t.strftime('%I:%M %p')}."
 
@@ -540,7 +544,7 @@ class CommandDispatcher:
 
         # ── Play ──────────────────────────────────────────────────────────────
         if "play" in text:
-            query = re.sub(r"(play on spotify|play on youtube|play karo|bajao|play)", "", text).strip()
+            query = re.sub(r"\b(play on spotify|play on youtube|play karo|bajao|play)\b", "", text).strip()
             return MediaCommands.play_on_youtube(query)
 
         # ── Project Starters ──────────────────────────────────────────────────
@@ -637,7 +641,7 @@ class CommandDispatcher:
             return CalculatorCommands.evaluate(expr)
 
         # ── Password generator ───────────────────────────────────────────────
-        if "generate password" in text or "create password" in text or "new password" in text:
+        if re.search(r"generate.*password|create.*password|new\s+password", text):
             m = re.search(r"(\d+)", text)
             length = int(m.group(1)) if m else 16
             return PasswordCommands.generate(length)
@@ -691,10 +695,30 @@ class CommandDispatcher:
             return "Bataiye kya translate karna hai?"
 
         # ── Close Specific App ────────────────────────────────────────────────
-        if "close" in text and not any(k in text for k in ["close shadow", "close yourself", "pc band karo"]):
-            app_to_close = re.sub(r"(close|band karo|ko)", "", text).strip()
+        if re.search(r"\bclose\b", text) and not any(k in text for k in ["close shadow", "close yourself", "pc band karo"]):
+            app_to_close = re.sub(r"\b(close|band karo|ko)\b", "", text).strip()
             if app_to_close:
                 return AdvancedCommands.close_app(app_to_close)
+
+        # ── App Volume ────────────────────────────────────────────────────────
+        if "volume" in text and any(k in text for k in ["set", "make", "karo"]):
+            m = re.search(r"(?:set|make)\s+([a-zA-Z]+)\s+volume\s+to\s+(\d+)", text)
+            if m:
+                app, vol = m.group(1), int(m.group(2))
+                return AdvancedCommands.set_app_volume(app, vol / 100.0)
+
+        # ── Email ─────────────────────────────────────────────────────────────
+        if any(k in text for k in ["email", "mail"]):
+            if "send" in text:
+                # Basic parsing for "send email to X with subject Y and message Z"
+                # This is a bit complex for regex, usually handled better by AI if local fails
+                m = re.search(r"send\s+(?:email|mail)\s+to\s+([a-zA-Z0-9@._-]+)\s+subject\s+(.+?)\s+message\s+(.+)", text)
+                if m:
+                    return AdvancedCommands.send_email(m.group(1), m.group(2), m.group(3))
+
+        # ── Generic Stop ──────────────────────────────────────────────────────
+        if any(k in text for k in ["stop", "band karo", "ruk jao"]):
+            return "Kaam rok diya gaya hai."
 
         # ── AI Fallback ───────────────────────────────────────────────────────
         print("[DISPATCH] No local match → AI fallback")

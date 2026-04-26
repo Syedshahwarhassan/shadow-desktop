@@ -2,6 +2,8 @@ import pystray
 from PIL import Image, ImageDraw
 from PyQt6.QtCore import QThread, pyqtSignal
 import threading
+import os
+
 
 class TrayIcon:
     def __init__(self, hud, app):
@@ -11,7 +13,14 @@ class TrayIcon:
         self.thread = threading.Thread(target=self._run_tray, daemon=True)
 
     def _create_image(self):
-        # Create a simple icon image
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+        if os.path.exists(icon_path):
+            try:
+                return Image.open(icon_path)
+            except Exception:
+                pass
+        
+        # Fallback to simple icon image
         image = Image.new('RGB', (64, 64), (5, 10, 15))
         dc = ImageDraw.Draw(image)
         dc.ellipse([10, 10, 54, 54], outline=(0, 212, 255), width=4)
@@ -37,7 +46,10 @@ class TrayIcon:
             self.hud.show()
 
     def _open_settings(self):
-        print("Settings not implemented yet")
+        if hasattr(self, "_open_settings_callback"):
+            self._open_settings_callback()
+        elif hasattr(self, "hud") and hasattr(self.hud, "open_settings"):
+            self.hud.open_settings()
 
     def _restart(self):
         import sys

@@ -12,3 +12,8 @@ reminders.json
 memory.json
 reminders.json
 temp_*.mp3
+Output/*
+scratch/*
+models/*
+installer.iss
+project_structure.md

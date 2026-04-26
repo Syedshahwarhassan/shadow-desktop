@@ -368,3 +368,35 @@ class AdvancedCommands:
             return f"Mouse moved {action}."
         except:
             return "Mouse control failed."
+
+    @staticmethod
+    def set_app_volume(app_name, volume_level):
+        """Set volume for a specific application (0.0 to 1.0)."""
+        try:
+            from pycaw.pycaw import AudioUtilities
+            sessions = AudioUtilities.GetAllSessions()
+            for session in sessions:
+                volume = session.SimpleAudioVolume
+                if session.Process and session.Process.name().lower() == f"{app_name.lower()}.exe":
+                    volume.SetMasterVolume(float(volume_level), None)
+                    return f"Volume for {app_name} set to {int(volume_level * 100)}%."
+            return f"Could not find a running process for {app_name}."
+        except Exception as e:
+            return f"App volume control failed: {e}"
+
+    @staticmethod
+    def send_email(recipient, subject, contents):
+        """Send a basic email using yagmail (requires credentials in config)."""
+        try:
+            import yagmail
+            user = config_manager.get("credentials.gmail_email")
+            password = config_manager.get("credentials.gmail_password")
+            
+            if not user or not password:
+                return "Email credentials missing. Please add gmail_email and gmail_password to config.json."
+            
+            yag = yagmail.SMTP(user, password)
+            yag.send(to=recipient, subject=subject, contents=contents)
+            return f"Email successfully sent to {recipient}."
+        except Exception as e:
+            return f"Failed to send email: {e}"

@@ -22,7 +22,9 @@ import psutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QTimer, QObject, pyqtSignal
+from PyQt6.QtCore import QTimer, QObject, pyqtSignal, Qt
+from PyQt6.QtGui import QIcon
+import keyboard
 
 from hud import HUDWindow
 from listener import Listener
@@ -56,6 +58,13 @@ class VoiceSignal(QObject):
 class AntiGravityApp:
     def __init__(self):
         self.app        = QApplication(sys.argv)
+        self.app.setApplicationName("Shadow")
+        
+        # Set App Icon
+        icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
+        if os.path.exists(icon_path):
+            self.app.setWindowIcon(QIcon(icon_path))
+
         self.hud        = HUDWindow(config_manager)
         self.settings   = SettingsWindow(self.hud)
         self.dispatcher = CommandDispatcher(self.hud)
@@ -90,6 +99,22 @@ class AntiGravityApp:
         )
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
+        
+        # Global Hotkey (non-blocking)
+        hotkey = config_manager.get("hotkey", "win+shift+s")
+        try:
+            keyboard.add_hotkey(hotkey, self.toggle_visibility)
+            print(f"[INIT] Global hotkey active: {hotkey}")
+        except Exception as e:
+            print(f"[ERR] Failed to bind hotkey: {e}")
+
+    def toggle_visibility(self) -> None:
+        if self.hud.isVisible():
+            self.hud.hide()
+        else:
+            self.hud.show()
+            self.hud.activateWindow()
+            self.hud.raise_()
 
     def update_stats(self) -> None:
         self.hud.update_stats(psutil.cpu_percent(interval=None),
