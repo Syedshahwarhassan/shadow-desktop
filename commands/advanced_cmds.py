@@ -65,30 +65,64 @@ class AdvancedCommands:
             return "Folder does not exist."
             
         extensions = {
-            'Images': ['.jpg', '.jpeg', '.png', '.gif', '.bmp'],
-            'Videos': ['.mp4', '.mkv', '.avi', '.mov'],
-            'Documents': ['.pdf', '.docx', '.doc', '.txt', '.xlsx', '.pptx'],
-            'Music': ['.mp3', '.wav', '.flac'],
-            'Archives': ['.zip', '.rar', '.7z'],
-            'Executables': ['.exe', '.msi']
+            'Images': ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico'],
+            'Videos': ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv'],
+            'Documents': ['.pdf', '.docx', '.doc', '.txt', '.xlsx', '.pptx', '.csv', '.rtf'],
+            'Music': ['.mp3', '.wav', '.flac', '.m4a', '.aac'],
+            'Archives': ['.zip', '.rar', '.7z', '.tar', '.gz'],
+            'Executables': ['.exe', '.msi', '.bat', '.sh'],
+            'Shortcuts': ['.lnk', '.url'],
+            'Installers': ['.iso', '.dmg', '.pkg']
         }
         
         count = 0
+        moved_anything = False
+        
+        # 1. Move files
         for filename in os.listdir(folder_path):
             filepath = os.path.join(folder_path, filename)
+            
+            # Skip directories we created or existing ones
             if os.path.isdir(filepath):
                 continue
                 
             file_ext = os.path.splitext(filename)[1].lower()
+            target_category = "Other"
+            
             for folder_name, exts in extensions.items():
                 if file_ext in exts:
-                    dest_folder = os.path.join(folder_path, folder_name)
-                    os.makedirs(dest_folder, exist_ok=True)
-                    shutil.move(filepath, os.path.join(dest_folder, filename))
-                    count += 1
+                    target_category = folder_name
                     break
+            
+            dest_folder = os.path.join(folder_path, target_category)
+            os.makedirs(dest_folder, exist_ok=True)
+            
+            # Handle duplicate filenames
+            base_name, ext = os.path.splitext(filename)
+            dest_path = os.path.join(dest_folder, filename)
+            counter = 1
+            while os.path.exists(dest_path):
+                dest_path = os.path.join(dest_folder, f"{base_name} ({counter}){ext}")
+                counter += 1
+            
+            try:
+                shutil.move(filepath, dest_path)
+                count += 1
+                moved_anything = True
+            except Exception as e:
+                print(f"[ERR] Failed to move {filename}: {e}")
         
-        return f"Organized {count} files in {os.path.basename(folder_path)}."
+        # 2. Cleanup empty directories (optional but good for 'safai')
+        if moved_anything:
+            for item in os.listdir(folder_path):
+                item_path = os.path.join(folder_path, item)
+                if os.path.isdir(item_path) and not os.listdir(item_path):
+                    try:
+                        os.rmdir(item_path)
+                    except:
+                        pass
+        
+        return f"Safai mukammal! {count} files ko organize kar diya gaya hai {os.path.basename(folder_path)} mein."
 
     @staticmethod
     def close_app(app_name):
@@ -105,6 +139,35 @@ class AdvancedCommands:
         if count > 0:
             return f"Closed {count} instances of {app_name}."
         return f"No running app found with name {app_name}."
+
+    @staticmethod
+    def clean_temp_files():
+        temp_paths = [
+            os.environ.get('TEMP'),
+            os.path.join(os.environ.get('SystemRoot', 'C:\\Windows'), 'Temp')
+        ]
+        
+        deleted_count = 0
+        error_count = 0
+        
+        for path in temp_paths:
+            if not path or not os.path.exists(path):
+                continue
+            
+            for filename in os.listdir(path):
+                file_path = os.path.join(path, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                        deleted_count += 1
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                        deleted_count += 1
+                except Exception:
+                    # Files in use cannot be deleted, which is normal
+                    error_count += 1
+        
+        return f"Safai mukammal! {deleted_count} temporary files ko delete kar diya gaya hai. ({error_count} files in-use thi aur delete nahi ho sakeen)."
 
     @staticmethod
     def check_port(port):

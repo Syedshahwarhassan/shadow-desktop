@@ -84,7 +84,7 @@ class HUDWindow(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         
         scale_factor = self.diameter / 400.0
         painter.scale(scale_factor, scale_factor)

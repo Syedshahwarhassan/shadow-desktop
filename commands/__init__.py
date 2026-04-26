@@ -120,6 +120,9 @@ URDU_MAP = {
     "baje":         "pm",
     "yad dilana":   "remind me",
     "yad dilao":    "remind me",
+    "یاد دلانا":      "remind me",
+    "یاد دلاؤ":       "remind me",
+    "ریمائنڈ می":     "remind me",
     "ٹائمر لگاؤ":      "set timer",
     "الارم لگاؤ":      "set alarm",
     # Dictation/Typing
@@ -135,6 +138,15 @@ URDU_MAP = {
     "ip batao":     "my ip",
     "speed test":   "speed test",
     "safai karo":   "organize desktop",
+    "صفائی کرو":      "organize desktop",
+    "صاف کرو":       "organize desktop",
+    "desktop saaf karo": "organize desktop",
+    "downloads saaf karo": "organize downloads",
+    "documents saaf karo": "organize documents",
+    "bin khali karo": "empty trash",
+    "kuda saaf karo": "empty trash",
+    "faltu files khatam karo": "clean temp",
+    "temp saaf karo": "clean temp",
     "urdu mein":    "translate to urdu",
     "english mein": "translate to english",
     "health check": "system health",
@@ -263,7 +275,7 @@ class CommandDispatcher:
             if "click" in text: return AdvancedCommands.mouse_control("click")
 
         # ── Port Checker ──────────────────────────────────────────────────────
-        if "port" in text:
+        if re.search(r"\bport\b", text):
             m = re.search(r"(\d+)", text)
             if m:
                 return AdvancedCommands.check_port(m.group(1))
@@ -411,16 +423,24 @@ class CommandDispatcher:
                 name = "New File"
             return DesktopCommands.create_file(name)
 
-        # ── Advanced Desktop ──────────────────────────────────────────────────
-        if any(k in text for k in ["organize desktop", "desktop organize", "safai karo"]):
+        # ── Advanced Desktop / Cleaning ───────────────────────────────────────
+        if any(k in text for k in ["organize desktop", "desktop saaf karo", "safai karo", "desktop organize"]):
             import winshell
             desktop = winshell.desktop()
             return AdvancedCommands.organize_folder(desktop)
 
-        if any(k in text for k in ["organize downloads", "downloads organize"]):
+        if any(k in text for k in ["organize downloads", "downloads saaf karo", "downloads organize"]):
             import winshell
             downloads = winshell.folder("downloads")
             return AdvancedCommands.organize_folder(downloads)
+
+        if any(k in text for k in ["organize documents", "documents saaf karo", "documents organize"]):
+            import winshell
+            docs = winshell.folder("personal")
+            return AdvancedCommands.organize_folder(docs)
+
+        if any(k in text for k in ["clean temp", "temp saaf karo", "faltu files khatam karo"]):
+            return AdvancedCommands.clean_temp_files()
 
         # ── Screenshot ────────────────────────────────────────────────────────
         if "screenshot" in text:
@@ -504,7 +524,7 @@ class CommandDispatcher:
             return ProductivityCommands.get_quote()
 
         # ── Trash ─────────────────────────────────────────────────────────────
-        if any(k in text for k in ["trash", "recycle bin", "empty bin"]):
+        if any(k in text for k in ["trash", "recycle bin", "empty bin", "bin khali karo", "kuda saaf karo"]):
             return DesktopCommands.empty_trash()
 
         # ── Search ────────────────────────────────────────────────────────────
@@ -536,6 +556,9 @@ class CommandDispatcher:
                 return DevCommands.create_project_starter(found_framework, project_name)
 
         # ── AI Code Generation & Scaffolding ──────────────────────────────────
+        if any(k in text for k in ["login page", "login page banao", "login screen"]):
+            return DevCommands.create_login_page(raw_text)
+
         code_triggers = [
             "code a ", "code me ", "write a script", "write a program", 
             "create a program", "build a ", "generate code", 
@@ -613,16 +636,26 @@ class CommandDispatcher:
             length = int(m.group(1)) if m else 16
             return PasswordCommands.generate(length)
 
-        # ── Timer / alarm ────────────────────────────────────────────────────
-        if any(k in text for k in ["set timer", "start timer", "set alarm", "remind me in"]):
+        # ── Timer / alarm / reminder ──────────────────────────────────────────
+        if any(k in text for k in ["set timer", "start timer", "set alarm", "remind me", "yad dilana", "yad dilao"]):
             secs = TimerCommands.parse_duration(text)
             if secs:
-                # capture label after "for"
-                lbl_match = re.search(r"(?:to|for)\s+(.+?)(?:\s+in\s+|\s*$)", text)
-                label = lbl_match.group(1).strip() if lbl_match else "timer"
-                # The HUD/TTS callback fires on the timer thread — keep it simple
-                return TimerCommands.set_timer(secs, label)
-            return "Please tell me a duration, e.g. 'set timer for 5 minutes'."
+                # Capture label: everything between "remind me (to/that)" or "timer for" and the time/duration
+                # Remove common noise
+                lbl_text = text
+                for noise in ["set timer for", "set alarm for", "remind me to", "remind me that", "remind me", "yad dilana", "yad dilao"]:
+                    lbl_text = lbl_text.replace(noise, "")
+                
+                # Further clean: remove the time part from the label
+                # This is tricky without complex NLP, but we can remove digits and time units
+                label = re.sub(r"\d+\s*(hour|hr|minute|min|second|sec|pm|am|at|baje|o'clock)s?", "", lbl_text).strip()
+                label = re.sub(r"\bin\b|\bat\b", "", label).strip()
+                
+                if not label: label = "reminder"
+                
+                # The HUD/TTS callback fires on the timer thread
+                return TimerCommands.set_timer(secs, label, on_fire=lambda msg: self.hud.set_response(f"[EXCITED] {msg}"))
+            return "Zaroor, lekin kitni der baad? (e.g. 'set timer for 5 minutes' ya 'remind me at 5pm')"
 
         if "list timers" in text or "active timers" in text or "show timers" in text:
             return TimerCommands.list_active()

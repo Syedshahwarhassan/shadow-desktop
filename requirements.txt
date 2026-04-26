@@ -11,6 +11,8 @@ screen-brightness-control
 pyperclip
 pywhatkit
 googletrans==4.0.0-rc1
+httpcore==0.9.1
+httpx==0.13.3
 pyjokes
 yfinance
 openai

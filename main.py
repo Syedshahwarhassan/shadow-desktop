@@ -65,6 +65,11 @@ class AntiGravityApp:
         self.stats_timer.start(1500)  # snappier HUD refresh (was 2000ms)
 
         self.hud.show()
+        
+        # Load persistent reminders
+        from commands.extra_cmds import TimerCommands
+        TimerCommands.load_reminders(on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}"))
+        
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
 

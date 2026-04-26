@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 import math
+import json
 import random
 import secrets
 import string
@@ -273,9 +274,43 @@ class PasswordCommands:
 # ─────────────────────────────────────────────────────────────────────────────
 class TimerCommands:
     _timers: list[dict] = []
+    _reminders_file = "reminders.json"
 
     @classmethod
-    def set_timer(cls, seconds: int, label: str = "", on_fire=None) -> str:
+    def _save_reminders(cls):
+        try:
+            # Only save active future timers
+            data = [
+                {"label": t["label"], "fires_at": t["fires_at"].isoformat()}
+                for t in cls._timers if t["fires_at"] > datetime.now()
+            ]
+            with open(cls._reminders_file, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            print(f"[TIMER] Save error: {e}")
+
+    @classmethod
+    def load_reminders(cls, on_fire_callback=None):
+        if not os.path.exists(cls._reminders_file):
+            return
+        try:
+            with open(cls._reminders_file, "r") as f:
+                data = json.load(f)
+            
+            now = datetime.now()
+            for item in data:
+                fires_at = datetime.fromisoformat(item["fires_at"])
+                if fires_at > now:
+                    label = item["label"]
+                    # Calculate remaining seconds
+                    secs = (fires_at - now).total_seconds()
+                    cls.set_timer(secs, label, on_fire_callback, save=False)
+            print(f"[TIMER] Loaded {len(cls._timers)} active reminders.")
+        except Exception as e:
+            print(f"[TIMER] Load error: {e}")
+
+    @classmethod
+    def set_timer(cls, seconds: int, label: str = "", on_fire=None, save=True) -> str:
         seconds = max(1, int(seconds))
         label = (label or "").strip() or "timer"
         fires_at = datetime.now() + timedelta(seconds=seconds)
@@ -287,37 +322,61 @@ class TimerCommands:
                     on_fire(f"Time's up for {label}.")
                 except Exception as e:
                     print(f"[TIMER] callback error: {e}")
+            # Remove from active list after firing
+            cls._timers = [t for t in cls._timers if t["label"] != label or t["fires_at"] != fires_at]
+            cls._save_reminders()
 
         timer = threading.Timer(seconds, _fire)
         timer.daemon = True
         timer.start()
 
         cls._timers.append({"label": label, "fires_at": fires_at, "timer": timer})
-        return f"Timer set for {seconds} seconds ({label}). Will fire at {fires_at.strftime('%H:%M:%S')}."
+        if save:
+            cls._save_reminders()
+            
+        return f"Theek hai, main aapko {label} ke baare mein yaad dila dungi. ({fires_at.strftime('%I:%M %p')})"
 
     @classmethod
     def list_active(cls) -> str:
         active = [t for t in cls._timers if t["fires_at"] > datetime.now()]
         if not active:
-            return "No active timers."
+            return "Abhi koi active reminders nahi hain."
         lines = [
-            f"  - {t['label']} → {t['fires_at'].strftime('%H:%M:%S')}"
+            f"  - {t['label']} → {t['fires_at'].strftime('%I:%M %p')}"
             for t in active
         ]
-        return "Active timers:\n" + "\n".join(lines)
+        return "Active reminders:\n" + "\n".join(lines)
 
     @staticmethod
     def parse_duration(text: str) -> int | None:
-        """Parse '5 minutes' (relative) OR 'at 2pm' (absolute)."""
+        """Parse '5 minutes' (relative) OR 'at 2pm' (absolute). Handles Urdu numbers/time."""
         text = text.lower()
         
+        # Urdu mapping for numbers/time
+        urdu_time_map = {
+            "ek": "1", "do": "2", "teen": "3", "chaar": "4", "paanch": "5",
+            "che": "6", "saat": "7", "aath": "8", "no": "9", "dus": "10",
+            "gyara": "11", "bara": "12", "baje": "o'clock", "aadha": "30 minutes"
+        }
+        for u, e in urdu_time_map.items():
+            text = text.replace(u, e)
+
         # 1. Try absolute time patterns: "at 2pm", "at 14:30", "at 5"
         # Pattern: (at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?
-        abs_match = re.search(r"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)", text)
+        abs_match = re.search(r"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text)
         if abs_match:
             hour = int(abs_match.group(1))
             minute = int(abs_match.group(2)) if abs_match.group(2) else 0
             meridiem = abs_match.group(3)
+            
+            # Contextual meridiem if missing (e.g. "at 5" usually means 5pm if it's currently afternoon)
+            if not meridiem:
+                now_hour = datetime.now().hour
+                if hour <= 12:
+                    if hour < now_hour % 12: # Passed today, assume tomorrow or pm
+                        meridiem = "pm" if now_hour < 12 else "am" # actually complex
+                    else:
+                        meridiem = "am" if hour > 6 else "pm" # basic guess
             
             if meridiem == "pm" and hour < 12: hour += 12
             if meridiem == "am" and hour == 12: hour = 0
