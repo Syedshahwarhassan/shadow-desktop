@@ -32,7 +32,7 @@ WAKE_WORD_VARIANTS: frozenset[str] = frozenset([
     "\u0634\u06cc\u0688\u0648", "\u0634\u062f\u0648",
 ])
 
-_STT_TIMEOUT = 4.0   # seconds — first result wins within this window
+_STT_TIMEOUT = 6.0   # seconds — first result wins within this window
 _JOIN_TIMEOUT = 0.5  # brief wait for the slower recognizer
 
 
@@ -136,18 +136,24 @@ class Listener:
                 parts = matched.split(wake_word, 1)
                 command = parts[1].strip() if len(parts) > 1 else ""
 
-                if command:
-                    self.session_active_until = 0
-                    self.callback(command)
-                else:
-                    self.session_active_until = time.time() + 8.0
-                    self.callback("_WAKE_")
+                try:
+                    if command:
+                        self.session_active_until = 0
+                        self.callback(command)
+                    else:
+                        self.session_active_until = time.time() + 8.0
+                        self.callback("_WAKE_")
+                except Exception as e:
+                    print(f"[LISTENER ERR] Callback failure: {e}")
 
             elif time.time() < self.session_active_until:
                 print(f"[STT] In-session: {raw_text}")
                 tts_engine.stop()
                 self.session_active_until = 0
-                self.callback(raw_text)
+                try:
+                    self.callback(raw_text)
+                except Exception as e:
+                    print(f"[LISTENER ERR] Callback failure: {e}")
 
     def _find_wake(self, text_en: str, text_ur: str, wake_word: str) -> str:
         for text in (text_en, text_ur):

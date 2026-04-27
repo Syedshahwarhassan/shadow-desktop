@@ -1,20 +1,10 @@
-"""
-memory_manager.py — Persistent memory for Shadow.
-
-Optimisations
-─────────────
-• save_memory() runs in a daemon thread — note additions no longer block
-  the response pipeline.
-• Dirty flag skips redundant writes when the data hasn't changed.
-• Deduplication check before appending a new note.
-"""
-
 import json
 import os
 import sys
 import difflib
 import random
 import threading
+import time
 
 
 class MemoryManager:
@@ -28,25 +18,33 @@ class MemoryManager:
         self.memory      = self._load()
         self._dirty      = False
         self._save_lock  = threading.Lock()
+        self.sync_manager = None # Set by main.py
 
     # ── Load ──────────────────────────────────────────────────────────────────
 
     def _load(self) -> dict:
         if not os.path.exists(self.memory_file):
-            return {"notes": []}
+            return {"notes": [], "_metadata": {}}
         try:
             with open(self.memory_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if "_metadata" not in data:
+                    data["_metadata"] = {}
+                return data
         except Exception as e:
             print(f"[MEMORY] Load error: {e}")
-            return {"notes": []}
+            return {"notes": [], "_metadata": {}}
 
     # ── Save (async) ──────────────────────────────────────────────────────────
 
-    def save_memory(self) -> None:
+    def save_memory(self, broadcast: bool = True) -> None:
         """Non-blocking: fires a daemon thread to flush to disk."""
         if not self._dirty:
             return
+        
+        # Update metadata for changed keys (assuming 'notes' for now)
+        self.memory["_metadata"]["notes"] = time.time()
+        
         snapshot = json.dumps(self.memory, indent=4, ensure_ascii=False)
 
         def _write():
@@ -55,12 +53,48 @@ class MemoryManager:
                     with open(self.memory_file, "w", encoding="utf-8") as f:
                         f.write(snapshot)
                     self._dirty = False
+                    
+                    if broadcast and self.sync_manager:
+                        self.sync_manager.broadcast("MEMORY_UPDATED", {"memory": self.memory})
                 except Exception as e:
                     print(f"[MEMORY] Save error: {e}")
 
         threading.Thread(target=_write, daemon=True, name="memory-save").start()
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def handle_sync_update(self, payload: dict):
+        """Merge remote memory with local using last-write-wins."""
+        remote_memory = payload.get("memory", {})
+        remote_meta = remote_memory.get("_metadata", {})
+        local_meta = self.memory.get("_metadata", {})
+        
+        updated = False
+        for key, value in remote_memory.items():
+            if key == "_metadata": continue
+            
+            remote_ts = remote_meta.get(key, 0)
+            local_ts = local_meta.get(key, 0)
+            
+            if remote_ts > local_ts:
+                # Last-write-wins merge for lists (like notes)
+                if isinstance(value, list) and isinstance(self.memory.get(key), list):
+                    # For notes, we merge and deduplicate
+                    merged = list(set(self.memory[key] + value))
+                    if merged != self.memory[key]:
+                        self.memory[key] = merged
+                        self.memory["_metadata"][key] = remote_ts
+                        updated = True
+                else:
+                    # Overwrite for other types
+                    self.memory[key] = value
+                    self.memory["_metadata"][key] = remote_ts
+                    updated = True
+        
+        if updated:
+            self._dirty = True
+            self.save_memory(broadcast=False) # Prevent echo loop
+            print("[MEMORY] Synced with remote update.")
 
     def add_note(self, note: str) -> None:
         note = (note or "").strip()

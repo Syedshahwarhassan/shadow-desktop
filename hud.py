@@ -14,8 +14,8 @@ import math
 import random
 import time
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
-from PyQt6.QtGui import QPainter, QColor, QPen, QRadialGradient, QFont, QConicalGradient
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QPainter, QColor, QPen, QRadialGradient, QFont, QConicalGradient, QBrush
 
 
 class HUDWindow(QWidget):
@@ -32,6 +32,13 @@ class HUDWindow(QWidget):
         self.diameter = config.get("hud.diameter", 300)
         self.resize(self.diameter, self.diameter)
         self._corner_window()
+        
+        # Animations
+        self.setWindowOpacity(0.0)
+        self.fade_anim = QPropertyAnimation(self, b"windowOpacity")
+        self.fade_anim.setDuration(500)
+        self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.fade_anim.finished.connect(self._on_fade_finished)
 
         # State
         self.angle         = 0
@@ -66,6 +73,10 @@ class HUDWindow(QWidget):
         self.timer.timeout.connect(self.update)
         self.timer.start(self._active_interval)
 
+    def _on_fade_finished(self):
+        if self.windowOpacity() < 0.1:
+            self.hide()
+
     # ── Positioning ───────────────────────────────────────────────────────────
 
     def _corner_window(self):
@@ -93,21 +104,64 @@ class HUDWindow(QWidget):
             QMenu::item:selected { background:#00D4FF; color:#0A141E; }
         """)
         settings_action = menu.addAction("Settings")
+        restart_action  = menu.addAction("Restart System")
         exit_action     = menu.addAction("Exit System")
         action = menu.exec(event.globalPos())
         if action == settings_action:
             self.open_settings()
+        elif action == restart_action:
+            self._restart_app()
         elif action == exit_action:
             QApplication.quit()
+
+    def _restart_app(self):
+        import sys
+        import subprocess
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+        if getattr(sys, 'frozen', False):
+            args = [sys.executable] + sys.argv[1:]
+        else:
+            args = [sys.executable] + sys.argv
+        subprocess.Popen(args)
+        sys.exit()
 
     def open_settings(self):
         if hasattr(self, "_settings_callback"):
             self._settings_callback()
 
+    # ── Visibility Animations ──────────────────────────────────────────────────
+
+    def show_hud(self):
+        """Smoothly show the HUD with a Siri-like animation."""
+        if self.isVisible() and self.windowOpacity() > 0.9:
+            return
+            
+        self.show()
+        self.fade_anim.stop()
+        self.fade_anim.setStartValue(self.windowOpacity())
+        self.fade_anim.setEndValue(1.0)
+        self.fade_anim.start()
+        self.activateWindow()
+        self.raise_()
+
+    def hide_hud(self):
+        """Smoothly hide the HUD."""
+        if not self.isVisible() or self.fade_anim.endValue() == 0.0:
+            return
+
+        self.fade_anim.stop()
+        self.fade_anim.setStartValue(self.windowOpacity())
+        self.fade_anim.setEndValue(0.0)
+        self.fade_anim.start()
+
     # ── State setters ─────────────────────────────────────────────────────────
 
     def set_status(self, status: str):
         self.status = status
+        if not hasattr(self, "timer"):
+            return
+
         if status == "THINKING":
             self.angle_step = 8
             self.timer.setInterval(self._active_interval)
@@ -284,14 +338,33 @@ class HUDWindow(QWidget):
             painter.drawPoint(QPointF(px, py))
 
     def _draw_idle_core(self, painter, center, radius, color, pulse):
+        # Multi-layered Siri-like glow
         core  = radius * 0.35
-        alpha = int(100 + pulse * 50)
-        grad  = QRadialGradient(center, core)
-        grad.setColorAt(0, QColor(color.red(), color.green(), color.blue(), alpha))
-        grad.setColorAt(1, QColor(0, 0, 0, 0))
-        painter.setBrush(grad)
+        
+        # Layer 1: Outer soft glow
+        grad1 = QRadialGradient(center, core * 1.5)
+        grad1.setColorAt(0, QColor(color.red(), color.green(), color.blue(), 40))
+        grad1.setColorAt(1, QColor(0, 0, 0, 0))
+        painter.setBrush(grad1)
         painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(center, core * 1.5, core * 1.5)
+
+        # Layer 2: Colorful core
+        alpha = int(150 + pulse * 50)
+        grad2 = QRadialGradient(center, core)
+        # Mix in some secondary colors for Siri feel
+        grad2.setColorAt(0, QColor(color.red(), color.green(), color.blue(), alpha))
+        grad2.setColorAt(0.5, QColor(color.blue(), color.red(), 255, alpha - 20))
+        grad2.setColorAt(1, QColor(0, 0, 0, 0))
+        painter.setBrush(grad2)
         painter.drawEllipse(center, core, core)
+        
+        # Layer 3: Central bright spot
+        grad3 = QRadialGradient(center, core * 0.4)
+        grad3.setColorAt(0, QColor(255, 255, 255, 100))
+        grad3.setColorAt(1, QColor(0, 0, 0, 0))
+        painter.setBrush(grad3)
+        painter.drawEllipse(center, core * 0.4, core * 0.4)
 
     def _draw_ui_elements(self, painter, rect, center, radius, color):
         # Status label

@@ -91,36 +91,74 @@ class AntiGravityApp:
         self.stats_timer.timeout.connect(self.update_stats)
         self.stats_timer.start(1500)
 
-        self.hud.show()
+        # HUD starts hidden (managed by animations)
 
+        # ── Multi-Device Sync ─────────────────────────────────────────────────
+        from sync_manager import SyncManager
+        from lan_discovery import LANDiscovery
+        from memory_manager import memory_manager
         from commands.extra_cmds import TimerCommands
+
+        self.sync_manager = SyncManager(config_manager)
+        memory_manager.sync_manager = self.sync_manager
+        TimerCommands.sync_manager = self.sync_manager
+        
+        # Register Sync Handlers
+        self.sync_manager.on("MEMORY_UPDATED", memory_manager.handle_sync_update)
+        self.sync_manager.on("REMINDERS_UPDATED", TimerCommands.handle_sync_update)
+        self.sync_manager.on("COMMAND_REQUEST", self._handle_remote_command)
+        
+        # Link UI Status
+        self.sync_manager.status_changed.connect(self.settings.update_sync_status)
+
+        # LAN Discovery
+        self.lan_discovery = LANDiscovery(
+            config_manager.get("device_name", "My PC"),
+            port=8765
+        )
+        if config_manager.get("sync_enabled"):
+            self.lan_discovery.start()
+            self.sync_manager.start()
+
         TimerCommands.load_reminders(
             on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}")
         )
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
         
-        # Global Hotkey (non-blocking)
-        hotkey = config_manager.get("hotkey", "win+shift+s")
+        # Global Hotkeys (non-blocking)
+        hotkey      = config_manager.get("hotkey", "win+shift+s")
+        exit_hotkey = config_manager.get("exit_hotkey", "ctrl+shift+q")
+
         try:
             keyboard.add_hotkey(hotkey, self.toggle_visibility)
-            print(f"[INIT] Global hotkey active: {hotkey}")
+            keyboard.add_hotkey(exit_hotkey, self.cleanup)
+            print(f"[INIT] Visibility hotkey: {hotkey}")
+            print(f"[INIT] Emergency exit hotkey: {exit_hotkey}")
         except Exception as e:
-            print(f"[ERR] Failed to bind hotkey: {e}")
+            print(f"[ERR] Failed to bind hotkeys: {e}")
+
+    def _handle_remote_command(self, payload: dict, envelope: dict) -> None:
+        cmd_text = payload.get("command")
+        if cmd_text:
+            print(f"[SYNC] Remote command request from '{envelope.get('source')}': {cmd_text}")
+            # Execute as if spoken locally
+            self.signals.command_received.emit(cmd_text)
 
     def toggle_visibility(self) -> None:
-        if self.hud.isVisible():
-            self.hud.hide()
+        if self.hud.isVisible() and self.hud.windowOpacity() > 0.1:
+            self.hud.hide_hud()
         else:
-            self.hud.show()
-            self.hud.activateWindow()
-            self.hud.raise_()
+            self.hud.show_hud()
 
     def update_stats(self) -> None:
         self.hud.update_stats(psutil.cpu_percent(interval=None),
                               psutil.virtual_memory().percent)
 
     def handle_command(self, text: str) -> None:
+        # Show HUD when wake word or command is received
+        self.hud.show_hud()
+
         if text == "_WAKE_":
             print("[STATUS] Wake word — waiting for command…")
             self.hud.set_status("LISTENING")
@@ -140,12 +178,26 @@ class AntiGravityApp:
                 response = self.dispatcher.dispatch(text)
                 if cmd_id == self._active_cmd_id:
                     self.signals.response_ready.emit(response)
+                
+                # Broadcast execution result
+                if self.sync_manager:
+                    res_str = response if isinstance(response, str) else "Streaming response..."
+                    self.sync_manager.broadcast("COMMAND_EXECUTED", {
+                        "cmd": text,
+                        "result": res_str
+                    })
             except Exception as e:
                 print(f"[ERROR] {e}")
                 if cmd_id == self._active_cmd_id:
                     self.signals.response_ready.emit(f"Command error: {str(e)}")
 
-        self._dispatch_pool.submit(_task)
+        try:
+            if getattr(self, "_shutting_down", False):
+                print("[DISPATCH] Ignoring command, system is shutting down.")
+                return
+            self._dispatch_pool.submit(_task)
+        except RuntimeError:
+            print("[DISPATCH] Could not submit task; thread pool is shut down.")
 
     def finalize_response(self, response) -> None:
         self.hud.set_status("SPEAKING")
@@ -172,10 +224,35 @@ class AntiGravityApp:
             print("[RESPONSE COMPLETE]")
 
         print(f"{'='*50}\n[LISTENING] Back to listening…")
-        QTimer.singleShot(4000, lambda: self.hud.set_status("IDLE"))
+        
+        def _auto_hide():
+            self.hud.set_status("IDLE")
+            self.hud.hide_hud()
+            
+        # Give user time to read the response before hiding
+        QTimer.singleShot(6000, _auto_hide)
 
     def run(self) -> None:
-        sys.exit(self.app.exec())
+        try:
+            self.app.exec()
+        finally:
+            self.cleanup()
+
+    def cleanup(self) -> None:
+        self._shutting_down = True
+        print("[SHUTDOWN] Cleaning up...")
+        if hasattr(self, 'listener'):
+            self.listener.stop()
+        if hasattr(self, 'sync_manager'):
+            self.sync_manager.stop()
+        if hasattr(self, 'lan_discovery'):
+            self.lan_discovery.stop()
+        self._dispatch_pool.shutdown(wait=False)
+        
+        # We must use os._exit(0) instead of sys.exit(0) because cleanup()
+        # might be called from a background thread (e.g. the hotkey thread),
+        # and sys.exit() only kills the current thread.
+        os._exit(0)
 
 
 if __name__ == "__main__":

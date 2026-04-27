@@ -275,9 +275,12 @@ class PasswordCommands:
 class TimerCommands:
     _timers: list[dict] = []
     _reminders_file = "reminders.json"
+    sync_manager = None # Set by main.py
+    _last_sync_ts = 0
+    _on_fire_callback = None
 
     @classmethod
-    def _save_reminders(cls):
+    def _save_reminders(cls, broadcast: bool = True):
         try:
             # Only save active future timers
             data = [
@@ -286,16 +289,30 @@ class TimerCommands:
             ]
             with open(cls._reminders_file, "w") as f:
                 json.dump(data, f)
+            
+            cls._last_sync_ts = time.time()
+            
+            if broadcast and cls.sync_manager:
+                cls.sync_manager.broadcast("REMINDERS_UPDATED", {"reminders": data})
         except Exception as e:
             print(f"[TIMER] Save error: {e}")
 
     @classmethod
     def load_reminders(cls, on_fire_callback=None):
+        if on_fire_callback:
+            cls._on_fire_callback = on_fire_callback
+            
         if not os.path.exists(cls._reminders_file):
             return
         try:
             with open(cls._reminders_file, "r") as f:
                 data = json.load(f)
+            
+            # Cancel existing timers to avoid duplicates on reload
+            for t in cls._timers:
+                if "timer" in t:
+                    t["timer"].cancel()
+            cls._timers = []
             
             now = datetime.now()
             for item in data:
@@ -304,10 +321,25 @@ class TimerCommands:
                     label = item["label"]
                     # Calculate remaining seconds
                     secs = (fires_at - now).total_seconds()
-                    cls.set_timer(secs, label, on_fire_callback, save=False)
+                    cls.set_timer(secs, label, cls._on_fire_callback, save=False)
             print(f"[TIMER] Loaded {len(cls._timers)} active reminders.")
         except Exception as e:
             print(f"[TIMER] Load error: {e}")
+
+    @classmethod
+    def handle_sync_update(cls, payload: dict, envelope: dict):
+        """Overwrite reminders with remote data if it's newer."""
+        remote_ts = envelope.get("ts", 0)
+        if remote_ts > cls._last_sync_ts:
+            reminders = payload.get("reminders", [])
+            try:
+                with open(cls._reminders_file, "w") as f:
+                    json.dump(reminders, f)
+                cls._last_sync_ts = remote_ts
+                cls.load_reminders() # Reload scheduler
+                print("[TIMER] Reminders synced with remote update.")
+            except Exception as e:
+                print(f"[TIMER] Sync save error: {e}")
 
     @classmethod
     def set_timer(cls, seconds: int, label: str = "", on_fire=None, save=True) -> str:

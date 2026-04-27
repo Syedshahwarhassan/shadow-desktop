@@ -19,6 +19,16 @@ the original function unchanged.
 
 import time
 import functools
+import logging
+
+# Configure logger
+logger = logging.getLogger("Shadow")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 def timeit(func):

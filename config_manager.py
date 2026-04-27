@@ -26,13 +26,40 @@ class ConfigManager:
 
     def _load(self) -> dict:
         if not os.path.exists(CONFIG_FILE):
-            return {}
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"[CONFIG] Load error: {e}")
-            return {}
+            data = {}
+        else:
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception as e:
+                print(f"[CONFIG] Load error: {e}")
+                data = {}
+        
+        # Ensure sync defaults
+        defaults = {
+            "sync_enabled": False,
+            "sync_server_url": "ws://localhost:8765",
+            "sync_room_id": "shadow-default",
+            "device_id": "",
+            "device_name": "My PC"
+        }
+        
+        changed = False
+        for k, v in defaults.items():
+            if k not in data:
+                data[k] = v
+                changed = True
+        
+        if not data.get("device_id"):
+            import uuid
+            data["device_id"] = str(uuid.uuid4())
+            changed = True
+            
+        if changed:
+            self.config = data
+            self.save_config()
+            
+        return data
 
     def reload(self) -> None:
         """Reload config from disk at runtime."""

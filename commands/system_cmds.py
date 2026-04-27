@@ -92,9 +92,14 @@ class SystemCommands:
     @staticmethod
     def restart_self():
         import sys
+        import subprocess
         print("[CMD] Restarting Shadow...")
-        # os.execv replaces the current process with a new one
-        os.execv(sys.executable, [sys.executable] + sys.argv[1:])
+        if getattr(sys, 'frozen', False):
+            args = [sys.executable] + sys.argv[1:]
+        else:
+            args = [sys.executable] + sys.argv
+        subprocess.Popen(args)
+        os._exit(0)
 
     @staticmethod
     def close_self():

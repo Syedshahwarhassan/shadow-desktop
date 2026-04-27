@@ -8,10 +8,10 @@
         "force_powershell": true
     },
     "hud": {
-        "opacity": 0.8,
+        "opacity": 0.52,
         "theme_color": "#00D4FF",
         "position": "center",
-        "diameter": 150
+        "diameter": 161
     },
     "api_keys": {
         "openai": "",
@@ -22,5 +22,13 @@
     "credentials": {
         "gmail_email": "",
         "gmail_password": ""
-    }
+    },
+    "sync_enabled": true,
+    "sync_server_url": "ws://localhost:8765",
+    "sync_room_id": "shadow-default",
+    "device_id": "573d15f1-27e4-4340-9023-a8041938b0ba",
+    "device_name": "My PC",
+    "hotkey": "win+shift+s",
+    "exit_hotkey": "ctrl+shift+q",
+    "autostart": true
 }
