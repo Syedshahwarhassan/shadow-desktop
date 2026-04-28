@@ -40,13 +40,11 @@ _EMOTION_TAGS  = frozenset(["HAPPY", "SAD", "EXCITED", "ANGRY", "CURIOUS", "CALM
 _TAG_RE        = re.compile(r"^\[(" + "|".join(_EMOTION_TAGS) + r")\]\s*", re.IGNORECASE)
 _STRIP_TAGS_RE = re.compile(r"\[(?:" + "|".join(_EMOTION_TAGS) + r")\]", re.IGNORECASE)
 
-
 def _extract_emotion(text: str) -> tuple[str, str]:
     m = _TAG_RE.match(text)
     if m:
         return m.group(1).upper(), text[m.end():]
     return "CALM", text
-
 
 class VoiceSignal(QObject):
     command_received   = pyqtSignal(str)
@@ -54,13 +52,11 @@ class VoiceSignal(QObject):
     status_update      = pyqtSignal(str)
     settings_requested = pyqtSignal()
 
-
 class AntiGravityApp:
     def __init__(self):
         self.app        = QApplication(sys.argv)
         self.app.setApplicationName("Shadow")
         
-        # Set App Icon
         icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
         if os.path.exists(icon_path):
             self.app.setWindowIcon(QIcon(icon_path))
@@ -82,7 +78,6 @@ class AntiGravityApp:
         self.tray._open_settings    = self.signals.settings_requested.emit
         self.hud._settings_callback = self.signals.settings_requested.emit
 
-        # Persistent pool — no thread-creation overhead per command
         self._dispatch_pool  = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dispatch")
         self._active_cmd_id  = 0
 
@@ -90,8 +85,6 @@ class AntiGravityApp:
         self.stats_timer = QTimer()
         self.stats_timer.timeout.connect(self.update_stats)
         self.stats_timer.start(1500)
-
-        # HUD starts hidden (managed by animations)
 
         # ── Multi-Device Sync ─────────────────────────────────────────────────
         from sync_manager import SyncManager
@@ -103,30 +96,20 @@ class AntiGravityApp:
         memory_manager.sync_manager = self.sync_manager
         TimerCommands.sync_manager = self.sync_manager
         
-        # Register Sync Handlers
         self.sync_manager.on("MEMORY_UPDATED", memory_manager.handle_sync_update)
         self.sync_manager.on("REMINDERS_UPDATED", TimerCommands.handle_sync_update)
         self.sync_manager.on("COMMAND_REQUEST", self._handle_remote_command)
-        
-        # Link UI Status
         self.sync_manager.status_changed.connect(self.settings.update_sync_status)
 
-        # LAN Discovery
-        self.lan_discovery = LANDiscovery(
-            config_manager.get("device_name", "My PC"),
-            port=8765
-        )
+        self.lan_discovery = LANDiscovery(config_manager.get("device_name", "My PC"), port=8765)
         if config_manager.get("sync_enabled"):
             self.lan_discovery.start()
             self.sync_manager.start()
 
-        TimerCommands.load_reminders(
-            on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}")
-        )
+        TimerCommands.load_reminders(on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}"))
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
         
-        # Global Hotkeys (non-blocking)
         hotkey      = config_manager.get("hotkey", "win+shift+s")
         exit_hotkey = config_manager.get("exit_hotkey", "ctrl+shift+q")
 
@@ -142,7 +125,6 @@ class AntiGravityApp:
         cmd_text = payload.get("command")
         if cmd_text:
             print(f"[SYNC] Remote command request from '{envelope.get('source')}': {cmd_text}")
-            # Execute as if spoken locally
             self.signals.command_received.emit(cmd_text)
 
     def toggle_visibility(self) -> None:
@@ -152,23 +134,17 @@ class AntiGravityApp:
             self.hud.show_hud()
 
     def update_stats(self) -> None:
-        self.hud.update_stats(psutil.cpu_percent(interval=None),
-                              psutil.virtual_memory().percent)
+        self.hud.update_stats(psutil.cpu_percent(interval=None), psutil.virtual_memory().percent)
 
     def handle_command(self, text: str) -> None:
-        # Show HUD when wake word or command is received
         self.hud.show_hud()
-
         if text == "_WAKE_":
-            print("[STATUS] Wake word — waiting for command…")
             self.hud.set_status("LISTENING")
             tts_engine.speak("Yes?")
             return
-
         print(f"\n{'='*50}\n[COMMAND] '{text}'")
         self.hud.set_status("THINKING")
         self.hud.set_command(text)
-
         self._active_cmd_id += 1
         cmd_id = self._active_cmd_id
 
@@ -178,30 +154,21 @@ class AntiGravityApp:
                 response = self.dispatcher.dispatch(text)
                 if cmd_id == self._active_cmd_id:
                     self.signals.response_ready.emit(response)
-                
-                # Broadcast execution result
                 if self.sync_manager:
                     res_str = response if isinstance(response, str) else "Streaming response..."
-                    self.sync_manager.broadcast("COMMAND_EXECUTED", {
-                        "cmd": text,
-                        "result": res_str
-                    })
+                    self.sync_manager.broadcast("COMMAND_EXECUTED", {"cmd": text, "result": res_str})
             except Exception as e:
                 print(f"[ERROR] {e}")
                 if cmd_id == self._active_cmd_id:
                     self.signals.response_ready.emit(f"Command error: {str(e)}")
 
         try:
-            if getattr(self, "_shutting_down", False):
-                print("[DISPATCH] Ignoring command, system is shutting down.")
-                return
+            if getattr(self, "_shutting_down", False): return
             self._dispatch_pool.submit(_task)
-        except RuntimeError:
-            print("[DISPATCH] Could not submit task; thread pool is shut down.")
+        except RuntimeError: pass
 
     def finalize_response(self, response) -> None:
         self.hud.set_status("SPEAKING")
-
         if isinstance(response, str):
             emotion, clean = _extract_emotion(response)
             print(f"[RESPONSE] {clean}  (Emotion: {emotion})")
@@ -211,8 +178,7 @@ class AntiGravityApp:
         else:
             full, first = "", True
             for sentence in response:
-                if not sentence:
-                    continue
+                if not sentence: continue
                 if first:
                     emotion, _ = _extract_emotion(sentence)
                     self.hud.set_emotion(emotion)
@@ -222,38 +188,24 @@ class AntiGravityApp:
                 self.hud.set_response(_STRIP_TAGS_RE.sub("", full).strip())
                 tts_engine.speak(sentence)
             print("[RESPONSE COMPLETE]")
-
         print(f"{'='*50}\n[LISTENING] Back to listening…")
-        
         def _auto_hide():
             self.hud.set_status("IDLE")
             self.hud.hide_hud()
-            
-        # Give user time to read the response before hiding
         QTimer.singleShot(6000, _auto_hide)
 
     def run(self) -> None:
-        try:
-            self.app.exec()
-        finally:
-            self.cleanup()
+        try: self.app.exec()
+        finally: self.cleanup()
 
     def cleanup(self) -> None:
         self._shutting_down = True
         print("[SHUTDOWN] Cleaning up...")
-        if hasattr(self, 'listener'):
-            self.listener.stop()
-        if hasattr(self, 'sync_manager'):
-            self.sync_manager.stop()
-        if hasattr(self, 'lan_discovery'):
-            self.lan_discovery.stop()
+        if hasattr(self, 'listener'): self.listener.stop()
+        if hasattr(self, 'sync_manager'): self.sync_manager.stop()
+        if hasattr(self, 'lan_discovery'): self.lan_discovery.stop()
         self._dispatch_pool.shutdown(wait=False)
-        
-        # We must use os._exit(0) instead of sys.exit(0) because cleanup()
-        # might be called from a background thread (e.g. the hotkey thread),
-        # and sys.exit() only kills the current thread.
         os._exit(0)
-
 
 if __name__ == "__main__":
     AntiGravityApp().run()

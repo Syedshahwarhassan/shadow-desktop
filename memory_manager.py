@@ -6,7 +6,6 @@ import random
 import threading
 import time
 
-
 class MemoryManager:
     def __init__(self, memory_file: str = "memory.json"):
         if getattr(sys, "frozen", False):
@@ -19,8 +18,6 @@ class MemoryManager:
         self._dirty      = False
         self._save_lock  = threading.Lock()
         self.sync_manager = None # Set by main.py
-
-    # ── Load ──────────────────────────────────────────────────────────────────
 
     def _load(self) -> dict:
         if not os.path.exists(self.memory_file):
@@ -35,65 +32,46 @@ class MemoryManager:
             print(f"[MEMORY] Load error: {e}")
             return {"notes": [], "_metadata": {}}
 
-    # ── Save (async) ──────────────────────────────────────────────────────────
-
     def save_memory(self, broadcast: bool = True) -> None:
-        """Non-blocking: fires a daemon thread to flush to disk."""
         if not self._dirty:
             return
-        
-        # Update metadata for changed keys (assuming 'notes' for now)
         self.memory["_metadata"]["notes"] = time.time()
-        
         snapshot = json.dumps(self.memory, indent=4, ensure_ascii=False)
-
         def _write():
             with self._save_lock:
                 try:
                     with open(self.memory_file, "w", encoding="utf-8") as f:
                         f.write(snapshot)
                     self._dirty = False
-                    
                     if broadcast and self.sync_manager:
                         self.sync_manager.broadcast("MEMORY_UPDATED", {"memory": self.memory})
                 except Exception as e:
                     print(f"[MEMORY] Save error: {e}")
-
         threading.Thread(target=_write, daemon=True, name="memory-save").start()
 
-    # ── Public API ────────────────────────────────────────────────────────────
-
     def handle_sync_update(self, payload: dict):
-        """Merge remote memory with local using last-write-wins."""
         remote_memory = payload.get("memory", {})
         remote_meta = remote_memory.get("_metadata", {})
         local_meta = self.memory.get("_metadata", {})
-        
         updated = False
         for key, value in remote_memory.items():
             if key == "_metadata": continue
-            
             remote_ts = remote_meta.get(key, 0)
             local_ts = local_meta.get(key, 0)
-            
             if remote_ts > local_ts:
-                # Last-write-wins merge for lists (like notes)
                 if isinstance(value, list) and isinstance(self.memory.get(key), list):
-                    # For notes, we merge and deduplicate
                     merged = list(set(self.memory[key] + value))
                     if merged != self.memory[key]:
                         self.memory[key] = merged
                         self.memory["_metadata"][key] = remote_ts
                         updated = True
                 else:
-                    # Overwrite for other types
                     self.memory[key] = value
                     self.memory["_metadata"][key] = remote_ts
                     updated = True
-        
         if updated:
             self._dirty = True
-            self.save_memory(broadcast=False) # Prevent echo loop
+            self.save_memory(broadcast=False)
             print("[MEMORY] Synced with remote update.")
 
     def add_note(self, note: str) -> None:
@@ -111,7 +89,7 @@ class MemoryManager:
         return "You have the following memories and notes:\n- " + \
                "\n- ".join(self.memory["notes"])
 
-    def search(self, query: str, threshold: float = 0.3) -> tuple:
+    def search(self, query: str) -> tuple:
         best, score = None, 0.0
         q = query.lower().strip()
         for note in self.memory["notes"]:
@@ -122,22 +100,23 @@ class MemoryManager:
                 s = difflib.SequenceMatcher(None, q, n).ratio()
             if s > score:
                 score, best = s, note
-        return (best, score) if score >= threshold else (None, 0)
+        return (best, score) if score >= 0.6 else (None, 0)
 
     def get_offline_response(self, query: str) -> str:
-        match, _ = self.search(query)
-        if match:
+        match, score = self.search(query)
+        if match and score >= 0.6:
             prefix = random.choice([
                 "Mujhe yeh yaad hai:", "Mere records ke mutabiq:",
                 "Jahan tak mujhe maloom hai,"
             ])
             return f"[CALM] {prefix} {match}."
-        return f"[CALM] {random.choice([
-            'Main abhi offline hoon, lekin main aapke local commands handle kar sakti hoon.',
-            'Internet na hone ki wajah se mera brain thoda slow hai, lekin local tasks kar sakti hoon.',
-            'Maaf kijiye, main abhi sirf wahi bata sakti hoon jo mujhe pehle se yaad hai.',
-            'Mera AI core connect nahi ho raha, lekin main aapki local madad ke liye tayyar hoon.',
-        ])}"
-
+        fallbacks = [
+            "Mera AI brain abhi connect nahi ho raha. Shayad API key ka masla hai ya internet slow hai.",
+            "Main abhi offline hoon, isliye sirf local commands handle kar sakti hoon.",
+            "Maaf kijiye, mujhe iska jawab nahi maloom aur mera brain connect nahi ho raha.",
+            "Connection error ki wajah se main detail mein jawab nahi de sakti. Kya main koi app kholun?",
+            "Mera AI core connect nahi ho raha, lekin main aapki local madad ke liye tayyar hoon."
+        ]
+        return f"[CALM] {random.choice(fallbacks)}"
 
 memory_manager = MemoryManager()
