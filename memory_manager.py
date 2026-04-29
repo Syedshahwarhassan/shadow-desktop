@@ -17,7 +17,6 @@ class MemoryManager:
         self.memory      = self._load()
         self._dirty      = False
         self._save_lock  = threading.Lock()
-        self.sync_manager = None # Set by main.py
 
     def _load(self) -> dict:
         if not os.path.exists(self.memory_file):
@@ -43,36 +42,10 @@ class MemoryManager:
                     with open(self.memory_file, "w", encoding="utf-8") as f:
                         f.write(snapshot)
                     self._dirty = False
-                    if broadcast and self.sync_manager:
-                        self.sync_manager.broadcast("MEMORY_UPDATED", {"memory": self.memory})
                 except Exception as e:
                     print(f"[MEMORY] Save error: {e}")
         threading.Thread(target=_write, daemon=True, name="memory-save").start()
 
-    def handle_sync_update(self, payload: dict):
-        remote_memory = payload.get("memory", {})
-        remote_meta = remote_memory.get("_metadata", {})
-        local_meta = self.memory.get("_metadata", {})
-        updated = False
-        for key, value in remote_memory.items():
-            if key == "_metadata": continue
-            remote_ts = remote_meta.get(key, 0)
-            local_ts = local_meta.get(key, 0)
-            if remote_ts > local_ts:
-                if isinstance(value, list) and isinstance(self.memory.get(key), list):
-                    merged = list(set(self.memory[key] + value))
-                    if merged != self.memory[key]:
-                        self.memory[key] = merged
-                        self.memory["_metadata"][key] = remote_ts
-                        updated = True
-                else:
-                    self.memory[key] = value
-                    self.memory["_metadata"][key] = remote_ts
-                    updated = True
-        if updated:
-            self._dirty = True
-            self.save_memory(broadcast=False)
-            print("[MEMORY] Synced with remote update.")
 
     def add_note(self, note: str) -> None:
         note = (note or "").strip()

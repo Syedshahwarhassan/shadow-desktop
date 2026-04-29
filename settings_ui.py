@@ -130,21 +130,18 @@ class SettingsWindow(QWidget):
         side_layout.setSpacing(5)
         self.nav_ai = NavButton("AI & BRAIN")
         self.nav_hud = NavButton("HUD APPEARANCE")
-        self.nav_sync = NavButton("SYNC & RELAY")
         self.nav_system = NavButton("SYSTEM")
         from PyQt6.QtWidgets import QButtonGroup
         self.btn_group = QButtonGroup(self)
         self.btn_group.addButton(self.nav_ai, 0)
         self.btn_group.addButton(self.nav_hud, 1)
-        self.btn_group.addButton(self.nav_sync, 2)
-        self.btn_group.addButton(self.nav_system, 3)
+        self.btn_group.addButton(self.nav_system, 2)
         self.btn_group.buttonClicked.connect(lambda b: self.pages.setCurrentIndex(self.btn_group.id(b)))
         side_layout.addWidget(self.nav_ai)
         side_layout.addWidget(self.nav_hud)
-        side_layout.addWidget(self.nav_sync)
         side_layout.addWidget(self.nav_system)
         side_layout.addStretch()
-        self.save_btn = QPushButton("SYNC CHANGES")
+        self.save_btn = QPushButton("SAVE CHANGES")
         self.save_btn.clicked.connect(self.save)
         self.save_btn.setMinimumHeight(50)
         self.save_btn.setStyleSheet("QPushButton { background: #00FF9D; color: #050A0F; border: none; font-family: 'Orbitron'; font-weight: bold; font-size: 12px; border-bottom-left-radius: 15px; } QPushButton:hover { background: #FFFFFF; }")
@@ -166,16 +163,6 @@ class SettingsWindow(QWidget):
         self.diameter_slider = ModernSlider(); self.diameter_slider.setRange(100, 500); self.diameter_slider.setValue(config_manager.get("hud.diameter", 300))
         hud_layout.addWidget(QLabel("HUD Diameter (px)")); hud_layout.addWidget(self.diameter_slider); hud_layout.addStretch(); self.pages.addWidget(hud_page)
 
-        sync_page = QWidget(); sync_layout = QVBoxLayout(sync_page)
-        sync_layout.addWidget(self.create_header("MULTI-DEVICE SYNC"))
-        self.sync_enabled_cb = QCheckBox("Enable Device Synchronization"); self.sync_enabled_cb.setChecked(config_manager.get("sync_enabled", False)); self.sync_enabled_cb.setStyleSheet("color: white;")
-        sync_layout.addWidget(self.sync_enabled_cb)
-        self.sync_url = self.create_input("Relay URL", config_manager.get("sync_server_url", "ws://localhost:8765"))
-        self.sync_room = self.create_input("Room ID", config_manager.get("sync_room_id", "shadow-default"))
-        self.device_name = self.create_input("Device Name", config_manager.get("device_name", "My PC"))
-        sync_layout.addWidget(self.sync_url); sync_layout.addWidget(self.sync_room); sync_layout.addWidget(self.device_name)
-        status_frame = QFrame(); sf_layout = QHBoxLayout(status_frame); self.status_dot = QFrame(); self.status_dot.setFixedSize(10, 10); self.status_dot.setStyleSheet("background: #FF4444; border-radius: 5px;")
-        self.status_label = QLabel("DISCONNECTED"); sf_layout.addWidget(self.status_dot); sf_layout.addWidget(self.status_label); sf_layout.addStretch(); sync_layout.addWidget(status_frame); sync_layout.addStretch(); self.pages.addWidget(sync_page)
 
         sys_page = QWidget(); sys_layout = QVBoxLayout(sys_page); sys_layout.addWidget(self.create_header("SYSTEM SETTINGS"))
         self.hotkey_input = self.create_input("Toggle Hotkey", config_manager.get("hotkey", "win+shift+s"))
@@ -196,11 +183,6 @@ class SettingsWindow(QWidget):
         edit.setStyleSheet("QLineEdit { background: rgba(255, 255, 255, 0.05); border: 1px solid #1A2634; border-radius: 5px; color: #FFFFFF; padding: 10px; } QLineEdit:focus { border-color: #00FF9D; }")
         layout.addWidget(edit); widget.input_field = edit; return widget
 
-    def update_sync_status(self, status: int):
-        colors = ["#FF4444", "#FFBB00", "#00FF88"]; texts = ["DISCONNECTED", "RECONNECTING", "CONNECTED"]
-        if 0 <= status < len(colors):
-            self.status_dot.setStyleSheet(f"background: {colors[status]}; border-radius: 5px;")
-            self.status_label.setText(texts[status]); self.status_label.setStyleSheet(f"color: {colors[status]};")
 
     def title_press(self, event): self._old_pos = event.globalPosition().toPoint()
     def title_move(self, event):
@@ -215,14 +197,10 @@ class SettingsWindow(QWidget):
         config_manager.set("api_keys.openrouter", self.openrouter_input.input_field.text())
         config_manager.set("api_keys.openai", self.openai_input.input_field.text())
         config_manager.set("api_keys.openweathermap", self.weather_input.input_field.text())
-        config_manager.set("sync_enabled", self.sync_enabled_cb.isChecked())
-        config_manager.set("sync_server_url", self.sync_url.input_field.text())
-        config_manager.set("sync_room_id", self.sync_room.input_field.text())
-        config_manager.set("device_name", self.device_name.input_field.text())
         config_manager.set("autostart", self.autostart_cb.isChecked())
         self.hud.setWindowOpacity(config_manager.get("hud.opacity")); self.hud.resize(config_manager.get("hud.diameter"), config_manager.get("hud.diameter"))
         self._handle_autostart(self.autostart_cb.isChecked())
-        self.save_btn.setText("SAVED ✓"); QTimer.singleShot(2000, lambda: self.save_btn.setText("SYNC CHANGES"))
+        self.save_btn.setText("SAVED ✓"); QTimer.singleShot(2000, lambda: self.save_btn.setText("SAVE CHANGES"))
 
     def _handle_autostart(self, enabled):
         if sys.platform != "win32": return

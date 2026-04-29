@@ -86,26 +86,8 @@ class AntiGravityApp:
         self.stats_timer.timeout.connect(self.update_stats)
         self.stats_timer.start(1500)
 
-        # ── Multi-Device Sync ─────────────────────────────────────────────────
-        from sync_manager import SyncManager
-        from lan_discovery import LANDiscovery
-        from memory_manager import memory_manager
+        # ── Reminders ─────────────────────────────────────────────────────────
         from commands.extra_cmds import TimerCommands
-
-        self.sync_manager = SyncManager(config_manager)
-        memory_manager.sync_manager = self.sync_manager
-        TimerCommands.sync_manager = self.sync_manager
-        
-        self.sync_manager.on("MEMORY_UPDATED", memory_manager.handle_sync_update)
-        self.sync_manager.on("REMINDERS_UPDATED", TimerCommands.handle_sync_update)
-        self.sync_manager.on("COMMAND_REQUEST", self._handle_remote_command)
-        self.sync_manager.status_changed.connect(self.settings.update_sync_status)
-
-        self.lan_discovery = LANDiscovery(config_manager.get("device_name", "My PC"), port=8765)
-        if config_manager.get("sync_enabled"):
-            self.lan_discovery.start()
-            self.sync_manager.start()
-
         TimerCommands.load_reminders(on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}"))
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
@@ -123,11 +105,6 @@ class AntiGravityApp:
 
         self.hud.show_hud()
 
-    def _handle_remote_command(self, payload: dict, envelope: dict) -> None:
-        cmd_text = payload.get("command")
-        if cmd_text:
-            print(f"[SYNC] Remote command request from '{envelope.get('source')}': {cmd_text}")
-            self.signals.command_received.emit(cmd_text)
 
     def toggle_visibility(self) -> None:
         if self.hud.isVisible() and self.hud.windowOpacity() > 0.1:
@@ -156,9 +133,6 @@ class AntiGravityApp:
                 response = self.dispatcher.dispatch(text)
                 if cmd_id == self._active_cmd_id:
                     self.signals.response_ready.emit(response)
-                if self.sync_manager:
-                    res_str = response if isinstance(response, str) else "Streaming response..."
-                    self.sync_manager.broadcast("COMMAND_EXECUTED", {"cmd": text, "result": res_str})
             except Exception as e:
                 print(f"[ERROR] {e}")
                 if cmd_id == self._active_cmd_id:
@@ -201,8 +175,6 @@ class AntiGravityApp:
         self._shutting_down = True
         print("[SHUTDOWN] Cleaning up...")
         if hasattr(self, 'listener'): self.listener.stop()
-        if hasattr(self, 'sync_manager'): self.sync_manager.stop()
-        if hasattr(self, 'lan_discovery'): self.lan_discovery.stop()
         self._dispatch_pool.shutdown(wait=False)
         os._exit(0)
 
