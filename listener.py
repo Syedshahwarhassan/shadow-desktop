@@ -187,8 +187,8 @@ class Listener:
         fut_ur = self._pool.submit(_recog, "ur-PK", "ur")
 
         done.wait(timeout=_STT_TIMEOUT)
-        if not done.is_set():
-            print(f"[STT] Timeout after {_STT_TIMEOUT}s — no result from Google")
+        # if not done.is_set():
+        #     print(f"[STT] Timeout after {_STT_TIMEOUT}s — no result from Google")
 
         # Brief extra wait so the slower recognizer can still contribute.
         # TimeoutError is expected when one language is slow — swallow it.

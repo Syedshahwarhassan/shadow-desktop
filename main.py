@@ -25,6 +25,13 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal, Qt
 from PyQt6.QtGui import QIcon
 import keyboard
+import ctypes
+
+# Fix High DPI scaling and "Access is denied" warnings on Windows
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
 
 from hud import HUDWindow
 from listener import Listener
