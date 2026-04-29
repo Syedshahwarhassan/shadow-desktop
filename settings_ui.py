@@ -21,8 +21,8 @@ class ModernSlider(QSlider):
                 border-radius: 3px;
             }
             QSlider::handle:horizontal {
-                background: #00D4FF;
-                border: 2px solid #00D4FF;
+                background: #00FF9D;
+                border: 2px solid #00FF9D;
                 width: 14px;
                 height: 14px;
                 margin: -5px 0;
@@ -30,7 +30,7 @@ class ModernSlider(QSlider):
             }
             QSlider::handle:horizontal:hover {
                 background: #FFFFFF;
-                border-color: #00D4FF;
+                border-color: #00FF9D;
             }
         """)
 
@@ -51,13 +51,13 @@ class NavButton(QPushButton):
                 font-weight: bold;
             }
             QPushButton:hover {
-                color: #00D4FF;
-                background: rgba(0, 212, 255, 0.05);
+                color: #00FF9D;
+                background: rgba(0, 255, 157, 0.05);
             }
             QPushButton:checked {
-                color: #00D4FF;
-                background: rgba(0, 212, 255, 0.1);
-                border-left: 3px solid #00D4FF;
+                color: #00FF9D;
+                background: rgba(0, 255, 157, 0.1);
+                border-left: 3px solid #00FF9D;
             }
         """)
 
@@ -77,7 +77,7 @@ class SettingsWindow(QWidget):
         self.container.setStyleSheet("""
             #MainContainer {
                 background-color: rgba(10, 20, 30, 0.95);
-                border: 1px solid #00D4FF;
+                border: 1px solid #00FF9D;
                 border-radius: 15px;
             }
         """)
@@ -108,7 +108,7 @@ class SettingsWindow(QWidget):
         tb_layout = QHBoxLayout(title_bar)
         tb_layout.setContentsMargins(20, 0, 10, 0)
         title = QLabel("SHADOW SETTINGS")
-        title.setStyleSheet("color: #00D4FF; font-family: 'Orbitron'; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
+        title.setStyleSheet("color: #00FF9D; font-family: 'Orbitron'; font-size: 16px; font-weight: bold; letter-spacing: 2px;")
         tb_layout.addWidget(title)
         tb_layout.addStretch()
         close_btn = QPushButton("✕")
@@ -147,7 +147,7 @@ class SettingsWindow(QWidget):
         self.save_btn = QPushButton("SYNC CHANGES")
         self.save_btn.clicked.connect(self.save)
         self.save_btn.setMinimumHeight(50)
-        self.save_btn.setStyleSheet("QPushButton { background: #00D4FF; color: #050A0F; border: none; font-family: 'Orbitron'; font-weight: bold; font-size: 12px; border-bottom-left-radius: 15px; } QPushButton:hover { background: #FFFFFF; }")
+        self.save_btn.setStyleSheet("QPushButton { background: #00FF9D; color: #050A0F; border: none; font-family: 'Orbitron'; font-weight: bold; font-size: 12px; border-bottom-left-radius: 15px; } QPushButton:hover { background: #FFFFFF; }")
         side_layout.addWidget(self.save_btn)
         self.content_layout.addWidget(sidebar)
 
@@ -185,13 +185,15 @@ class SettingsWindow(QWidget):
         sys_layout.addWidget(self.hotkey_input); sys_layout.addWidget(self.exit_hotkey_input); sys_layout.addWidget(self.weather_input); sys_layout.addWidget(self.autostart_cb); sys_layout.addStretch(); self.pages.addWidget(sys_page)
 
     def create_header(self, text):
-        lbl = QLabel(text); lbl.setStyleSheet("color: #FFFFFF; font-family: 'Orbitron'; font-size: 18px; font-weight: bold; border-bottom: 2px solid #00D4FF; padding-bottom: 5px;"); return lbl
+        lbl = QLabel(text); lbl.setStyleSheet("color: #FFFFFF; font-family: 'Orbitron'; font-size: 18px; font-weight: bold; border-bottom: 2px solid #00FF9D; padding-bottom: 5px;"); return lbl
 
     def create_input(self, label, value, password=False):
         widget = QWidget(); layout = QVBoxLayout(widget); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(5)
         lbl = QLabel(label); lbl.setStyleSheet("color: #A0AAB4; font-size: 12px;"); layout.addWidget(lbl)
-        edit = QLineEdit(str(value)); if password: edit.setEchoMode(QLineEdit.EchoMode.Password)
-        edit.setStyleSheet("QLineEdit { background: rgba(255, 255, 255, 0.05); border: 1px solid #1A2634; border-radius: 5px; color: #FFFFFF; padding: 10px; } QLineEdit:focus { border-color: #00D4FF; }")
+        edit = QLineEdit(str(value))
+        if password:
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+        edit.setStyleSheet("QLineEdit { background: rgba(255, 255, 255, 0.05); border: 1px solid #1A2634; border-radius: 5px; color: #FFFFFF; padding: 10px; } QLineEdit:focus { border-color: #00FF9D; }")
         layout.addWidget(edit); widget.input_field = edit; return widget
 
     def update_sync_status(self, status: int):
@@ -231,7 +233,10 @@ class SettingsWindow(QWidget):
                 cmd = f'"{sys.executable}"' if getattr(sys, 'frozen', False) else f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
                 winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, cmd)
             else:
-                try: winreg.DeleteValue(key, app_name); except FileNotFoundError: pass
+                try:
+                    winreg.DeleteValue(key, app_name)
+                except FileNotFoundError:
+                    pass
             winreg.CloseKey(key)
         except Exception as e: print(f"Autostart error: {e}")
 

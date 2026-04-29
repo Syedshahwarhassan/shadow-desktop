@@ -121,6 +121,8 @@ class AntiGravityApp:
         except Exception as e:
             print(f"[ERR] Failed to bind hotkeys: {e}")
 
+        self.hud.show_hud()
+
     def _handle_remote_command(self, payload: dict, envelope: dict) -> None:
         cmd_text = payload.get("command")
         if cmd_text:
@@ -189,10 +191,7 @@ class AntiGravityApp:
                 tts_engine.speak(sentence)
             print("[RESPONSE COMPLETE]")
         print(f"{'='*50}\n[LISTENING] Back to listening…")
-        def _auto_hide():
-            self.hud.set_status("IDLE")
-            self.hud.hide_hud()
-        QTimer.singleShot(6000, _auto_hide)
+        self.hud.set_status("IDLE")
 
     def run(self) -> None:
         try: self.app.exec()

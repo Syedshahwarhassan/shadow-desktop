@@ -32,8 +32,8 @@ WAKE_WORD_VARIANTS: frozenset[str] = frozenset([
     "\u0634\u06cc\u0688\u0648", "\u0634\u062f\u0648",
 ])
 
-_STT_TIMEOUT = 6.0   # seconds — first result wins within this window
-_JOIN_TIMEOUT = 0.5  # brief wait for the slower recognizer
+_STT_TIMEOUT = 3.0   # seconds — first result wins within this window
+_JOIN_TIMEOUT = 0.3  # brief wait for the slower recognizer
 
 
 class Listener:
@@ -51,8 +51,8 @@ class Listener:
 
         self.recognizer.energy_threshold         = 300
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold          = 0.8
-        self.recognizer.non_speaking_duration    = 0.5
+        self.recognizer.pause_threshold          = 0.6
+        self.recognizer.non_speaking_duration    = 0.4
 
         print("[INIT] Calibrating microphone…")
         with self.microphone as source:
