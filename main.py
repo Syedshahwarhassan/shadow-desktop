@@ -78,7 +78,7 @@ class AntiGravityApp:
         self.signals.status_update.connect(self.hud.set_status)
         self.signals.settings_requested.connect(self.settings.show)
 
-        self.listener = Listener(self.signals.command_received.emit)
+        self.listener = Listener(self.signals.command_received.emit, self.signals.status_update.emit)
 
         self.tray = TrayIcon(self.hud, self.app)
         self.tray.start()

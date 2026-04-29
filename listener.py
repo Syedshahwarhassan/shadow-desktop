@@ -32,15 +32,16 @@ WAKE_WORD_VARIANTS: frozenset[str] = frozenset([
     "\u0634\u06cc\u0688\u0648", "\u0634\u062f\u0648",
 ])
 
-_STT_TIMEOUT = 3.0   # seconds — first result wins within this window
-_JOIN_TIMEOUT = 0.3  # brief wait for the slower recognizer
+_STT_TIMEOUT = 2.0   # seconds — first result wins within this window
+_JOIN_TIMEOUT = 0.2  # brief wait for the slower recognizer
 
 
 class Listener:
-    def __init__(self, callback):
+    def __init__(self, callback, status_callback=None):
         self.recognizer   = sr.Recognizer()
         self.microphone   = sr.Microphone()
         self.callback     = callback
+        self.status_callback = status_callback
         self.is_listening = False
         self._stop_fn:    object = None
         self._audio_queue: queue.Queue = queue.Queue()
@@ -49,10 +50,10 @@ class Listener:
         # Thread pool reused across all recognition tasks
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="stt")
 
-        self.recognizer.energy_threshold         = 300
+        self.recognizer.energy_threshold         = 150
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold          = 0.6
-        self.recognizer.non_speaking_duration    = 0.4
+        self.recognizer.pause_threshold          = 0.55
+        self.recognizer.non_speaking_duration    = 0.35
 
         print("[INIT] Calibrating microphone…")
         with self.microphone as source:
@@ -99,18 +100,19 @@ class Listener:
                 print("[LISTENER] Queue backlog — dropping stale audio")
                 continue
 
-            # If TTS just finished speaking, drain any residual chunks captured
-            # during playback (microphone bleed-through).
-            if not tts_engine.is_speaking and self._audio_queue.qsize() > 1:
-                try:
-                    while self._audio_queue.qsize() > 1:
-                        self._audio_queue.get_nowait()
-                except Exception:
-                    pass
+
+            if self.status_callback:
+                # Only show THINKING if we have a decent audio chunk
+                if len(audio.get_raw_data()) > 1000:
+                    self.status_callback("THINKING")
 
             text_en, text_ur = self._recognize_parallel(audio)
             raw_text = text_en if text_en else text_ur
+            
             if not raw_text:
+                print("[STT] Silence or unrecognized audio.")
+                if self.status_callback:
+                    self.status_callback("IDLE")
                 continue
 
             wake_word = config_manager.get("wake_word", "shadow").lower()

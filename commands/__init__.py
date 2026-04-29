@@ -31,9 +31,11 @@ URDU_MAP = {
     "chalaao":      "open",
     "chalao":       "open",
     "launch karo":  "open",
+    "kho":          "open",
     "کھولو":         "open",
     "چلاؤ":          "open",
     "کھول دو":       "open",
+    "کھو":           "open",
     # Close
     "band karo":    "close",
     "band":         "close",
@@ -109,6 +111,13 @@ URDU_MAP = {
     "time batao":   "what time is it",
     "وقت بتاؤ":      "what time is it",
     "کیا ٹائم":      "what time is it",
+    "ٹائم بتاؤ":      "what time is it",
+    "ٹائم کیا ہوا":    "what time is it",
+    "time kya hai": "what time is it",
+    "mujhe time batao": "what time is it",
+    "mujhe waqt batao": "what time is it",
+    "مجھے ٹائم بتاؤ":    "what time is it",
+    "مجھے وقت بتاؤ":    "what time is it",
     # Quote / motivation
     "aqwal":        "quote",
     "motivation":   "quote",
@@ -180,6 +189,13 @@ URDU_MAP = {
     "gift status":  "git status",
     "gaming kids status": "git status",
     "give me a gift status": "git status",
+    # Conjunctions
+    "aur":        "and",
+    "phir":       "then",
+    "phr":        "then",
+    "uske baad":  "then",
+    "اور":         "and",
+    "پھر":         "then",
 }
 
 # Pre-sort the Urdu map ONCE at module load (longest-key first) so the
@@ -218,10 +234,9 @@ class CommandDispatcher:
     def _normalize(self, text):
         """Lower-case, translate Urdu keywords, fix word order."""
         t = text.lower().strip()
-        # Apply pre-sorted Urdu → English map (sorted once at module load).
+        # Apply pre-sorted Urdu → English map
         for urdu, english in _URDU_SORTED:
-            if urdu in t:  # cheap membership check
-                # Use word boundaries for small keywords to avoid partial matches
+            if urdu in t:
                 if len(urdu) <= 3:
                     t = re.sub(rf"\b{re.escape(urdu)}\b", english, t)
                 else:
@@ -230,9 +245,94 @@ class CommandDispatcher:
         t = _fix_word_order(t)
         return t
 
+    def _split_commands(self, text):
+        """
+        Splits a single string into multiple potential commands based on conjunctions.
+        Uses heuristics to distinguish between compound queries (cats and dogs)
+        and compound intents (search cats and open chrome).
+        """
+        t = text.lower().strip()
+        
+        # 1. Universal strong splitters (always split)
+        strong_splitters = r"\b(?:then|phir|uske baad|followed by|next|پھر)\b"
+        if re.search(strong_splitters, t):
+            parts = re.split(strong_splitters, t, flags=re.IGNORECASE)
+            return [p.strip() for p in parts if p.strip()]
+
+        # 2. Conditional splitters (and/aur/اور)
+        # We only split by 'and' if the second part starts with a known command verb.
+        weak_splitters = r"\b(?:and|aur|اور)\b"
+        if re.search(weak_splitters, t):
+            parts = re.split(weak_splitters, t, flags=re.IGNORECASE)
+            if len(parts) > 1:
+                # Verbs/Keywords that indicate a NEW command intent
+                action_verbs = {
+                    "open", "kholo", "launch", "start", "run", "chalao", "kho",
+                    "close", "band", "exit", "quit",
+                    "create", "make", "banao", "likho", "take",
+                    "search", "find", "google", "dhundho", "talash",
+                    "play", "bajao", "sunao", "gana",
+                    "volume", "brightness", "awaaz", "mute",
+                    "screenshot", "capture",
+                    "shutdown", "restart", "reboot", "lock",
+                    "type", "press", "click", "mouse", "scroll",
+                    "weather", "mausam", "time", "waqt", "quote", "joke", "latifa", "news",
+                    "timer", "alarm", "remind", "yad", "reminder",
+                    "translate", "ip", "speed", "safai", "clean", "empty",
+                }
+                
+                final_commands = [parts[0].strip()]
+                for p in parts[1:]:
+                    p_clean = p.strip()
+                    # Check if the first word of this part is a known action verb
+                    first_word = p_clean.split()[0] if p_clean else ""
+                    if first_word in action_verbs:
+                        final_commands.append(p_clean)
+                    else:
+                        # Not an action? Merge it back to the previous command (e.g. "cats and dogs")
+                        # We use the original conjunction "and" for the dispatcher's sake
+                        final_commands[-1] = f"{final_commands[-1]} and {p_clean}"
+                
+                return [c.strip() for c in final_commands if c.strip()]
+
+        return [text.strip()]
+
     def dispatch(self, raw_text):
+        """
+        Main entry point. Handles splitting and sequential execution.
+        """
+        # 1. Quick normalization for splitting check
+        normalized_check = self._normalize(raw_text)
+        
+        # 2. Split into parts
+        commands = self._split_commands(raw_text)
+        
+        if len(commands) > 1:
+            print(f"[DISPATCH] Multi-command detected: {commands}")
+            
+            def _multi_generator():
+                for i, cmd in enumerate(commands):
+                    # For each sub-command, call the internal executor
+                    resp = self._execute_single(cmd)
+                    
+                    # If it's a generator (AI streaming), yield from it
+                    if hasattr(resp, "__iter__") and not isinstance(resp, str):
+                        for chunk in resp:
+                            yield chunk
+                    else:
+                        # If it's a string, yield it as a single "sentence"
+                        yield resp
+                    
+                    # Add a small separator or pause indicator if needed
+                    # but usually sequential yielding is enough for TTS
+                
+            return _multi_generator()
+        else:
+            return self._execute_single(raw_text)
+
+    def _execute_single(self, raw_text):
         text = self._normalize(raw_text)
-        print(f"[DISPATCH] Normalized: '{text}'")
+        print(f"[DISPATCH] Processing: '{text}'")
 
         # -- Dictation mode check (highest priority) --------------------------
         # If dictation is active, type everything EXCEPT the stop command
@@ -721,5 +821,5 @@ class CommandDispatcher:
             return "Kaam rok diya gaya hai."
 
         # ── AI Fallback ───────────────────────────────────────────────────────
-        print("[DISPATCH] No local match → AI fallback")
+        print("[DISPATCH] No local match -> AI fallback")
         return ai_brain.get_response(raw_text, stream=True)
