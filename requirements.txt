@@ -4,7 +4,7 @@ pyttsx3
 pyaudio
 pystray
 pillow
-psutil
+psutil>=5.9.0
 pyautogui
 pycaw
 screen-brightness-control

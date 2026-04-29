@@ -41,7 +41,17 @@ class ConfigManager:
             "sync_server_url": "ws://localhost:8765",
             "sync_room_id": "shadow-default",
             "device_id": "",
-            "device_name": "My PC"
+            "device_name": "My PC",
+            "hud_visible_on_start": True,
+            "hud_opacity": 0.92,
+            "hud_x": -1,
+            "hud_y": -1,
+            "hud_width": 420,
+            "hud_height": 320,
+            "hud_theme": "dark",
+            "hud_scanline": True,
+            "hud_corners": True,
+            "hud_dodge_enabled": True
         }
         
         changed = False

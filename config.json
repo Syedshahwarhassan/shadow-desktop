@@ -30,5 +30,15 @@
     "sync_server_url": "ws://localhost:8765",
     "sync_room_id": "shadow-default",
     "device_id": "71e5c74f-978b-4c0f-b695-71e74c301ff1",
-    "device_name": "My PC"
+    "device_name": "My PC",
+    "hud_visible_on_start": true,
+    "hud_opacity": 0.92,
+    "hud_x": 689,
+    "hud_y": 248,
+    "hud_width": 420,
+    "hud_height": 320,
+    "hud_theme": "dark",
+    "hud_scanline": true,
+    "hud_corners": true,
+    "hud_dodge_enabled": true
 }

@@ -158,10 +158,44 @@ class SettingsWindow(QWidget):
 
         hud_page = QWidget(); hud_layout = QVBoxLayout(hud_page)
         hud_layout.addWidget(self.create_header("VISUAL INTERFACE"))
-        self.opacity_slider = ModernSlider(); self.opacity_slider.setRange(20, 100); self.opacity_slider.setValue(int(config_manager.get("hud.opacity", 0.8) * 100))
-        hud_layout.addWidget(QLabel("Interface Opacity")); hud_layout.addWidget(self.opacity_slider)
-        self.diameter_slider = ModernSlider(); self.diameter_slider.setRange(100, 500); self.diameter_slider.setValue(config_manager.get("hud.diameter", 300))
-        hud_layout.addWidget(QLabel("HUD Diameter (px)")); hud_layout.addWidget(self.diameter_slider); hud_layout.addStretch(); self.pages.addWidget(hud_page)
+        
+        self.hud_startup_cb = QCheckBox("Show HUD on startup")
+        self.hud_startup_cb.setChecked(config_manager.get("hud_visible_on_start", True))
+        self.hud_startup_cb.setStyleSheet("color: white;")
+        hud_layout.addWidget(self.hud_startup_cb)
+
+        hud_layout.addWidget(QLabel("Interface Opacity"))
+        self.opacity_slider = ModernSlider(); self.opacity_slider.setRange(20, 100); self.opacity_slider.setValue(int(config_manager.get("hud_opacity", 0.92) * 100))
+        self.opacity_slider.valueChanged.connect(lambda v: self.hud.setWindowOpacity(v/100.0))
+        hud_layout.addWidget(self.opacity_slider)
+        
+        btn_row = QHBoxLayout()
+        self.show_hud_btn = QPushButton("Show HUD")
+        self.show_hud_btn.clicked.connect(self.hud.show_hud)
+        self.hide_hud_btn = QPushButton("Hide HUD")
+        self.hide_hud_btn.clicked.connect(self.hud.hide_hud)
+        self.reset_hud_btn = QPushButton("Reset Position")
+        self.reset_hud_btn.clicked.connect(self.hud.reset_position)
+        btn_row.addWidget(self.show_hud_btn); btn_row.addWidget(self.hide_hud_btn); btn_row.addWidget(self.reset_hud_btn)
+        hud_layout.addLayout(btn_row)
+        
+        self.pos_lbl = QLabel(f"Position: {self.hud.x()}, {self.hud.y()}")
+        self.size_lbl = QLabel(f"Size: {self.hud.width()} × {self.hud.height()}")
+        self.pos_lbl.setStyleSheet("color: #a0aec0; font-size: 10px;")
+        self.size_lbl.setStyleSheet("color: #a0aec0; font-size: 10px;")
+        hud_layout.addWidget(self.pos_lbl); hud_layout.addWidget(self.size_lbl)
+        
+        self.scanline_cb = QCheckBox("Show scan line animation")
+        self.scanline_cb.setChecked(config_manager.get("hud_scanline", True))
+        self.scanline_cb.setStyleSheet("color: white;")
+        hud_layout.addWidget(self.scanline_cb)
+        
+        self.corners_cb = QCheckBox("Show corner accents")
+        self.corners_cb.setChecked(config_manager.get("hud_corners", True))
+        self.corners_cb.setStyleSheet("color: white;")
+        hud_layout.addWidget(self.corners_cb)
+        
+        hud_layout.addStretch(); self.pages.addWidget(hud_page)
 
 
         sys_page = QWidget(); sys_layout = QVBoxLayout(sys_page); sys_layout.addWidget(self.create_header("SYSTEM SETTINGS"))
@@ -192,13 +226,16 @@ class SettingsWindow(QWidget):
         config_manager.set("wake_word", self.wake_input.input_field.text().lower())
         config_manager.set("hotkey", self.hotkey_input.input_field.text().lower())
         config_manager.set("exit_hotkey", self.exit_hotkey_input.input_field.text().lower())
-        config_manager.set("hud.opacity", self.opacity_slider.value() / 100.0)
-        config_manager.set("hud.diameter", self.diameter_slider.value())
+        config_manager.set("hud_opacity", self.opacity_slider.value() / 100.0)
+        config_manager.set("hud_visible_on_start", self.hud_startup_cb.isChecked())
+        config_manager.set("hud_scanline", self.scanline_cb.isChecked())
+        config_manager.set("hud_corners", self.corners_cb.isChecked())
         config_manager.set("api_keys.openrouter", self.openrouter_input.input_field.text())
         config_manager.set("api_keys.openai", self.openai_input.input_field.text())
         config_manager.set("api_keys.openweathermap", self.weather_input.input_field.text())
         config_manager.set("autostart", self.autostart_cb.isChecked())
-        self.hud.setWindowOpacity(config_manager.get("hud.opacity")); self.hud.resize(config_manager.get("hud.diameter"), config_manager.get("hud.diameter"))
+        
+        self.hud.setWindowOpacity(config_manager.get("hud_opacity"))
         self._handle_autostart(self.autostart_cb.isChecked())
         self.save_btn.setText("SAVED ✓"); QTimer.singleShot(2000, lambda: self.save_btn.setText("SAVE CHANGES"))
 
@@ -219,4 +256,7 @@ class SettingsWindow(QWidget):
         except Exception as e: print(f"Autostart error: {e}")
 
     def showEvent(self, event):
-        screen = self.screen().availableGeometry(); self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2); super().showEvent(event)
+        screen = self.screen().availableGeometry(); self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
+        self.pos_lbl.setText(f"Position: {self.hud.x()}, {self.hud.y()}")
+        self.size_lbl.setText(f"Size: {self.hud.width()} × {self.hud.height()}")
+        super().showEvent(event)

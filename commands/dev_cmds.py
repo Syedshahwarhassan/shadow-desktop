@@ -114,3 +114,9 @@ class DevCommands:
 
         DevCommands.open_vscode(project_dir)
         return "Project created and opened in VS Code."
+
+    @staticmethod
+    def create_login_page(prompt):
+        """Specialized scaffolding for login pages."""
+        enhanced_prompt = f"Create a modern, responsive, and beautiful login page. {prompt}"
+        return DevCommands.scaffold_project(enhanced_prompt)

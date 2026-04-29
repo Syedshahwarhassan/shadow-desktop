@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from hud import HUDWindow
+from hud import ShadowHUD
 from listener import Listener
 from tts import tts_engine
 from commands import CommandDispatcher
@@ -54,10 +54,11 @@ def _extract_emotion(text: str) -> tuple[str, str]:
     return "CALM", text
 
 class VoiceSignal(QObject):
-    command_received   = pyqtSignal(str)
-    response_ready     = pyqtSignal(object)
-    status_update      = pyqtSignal(str)
-    settings_requested = pyqtSignal()
+    command_received    = pyqtSignal(str)
+    response_ready      = pyqtSignal(object)
+    status_update       = pyqtSignal(str)
+    settings_requested  = pyqtSignal()
+    transcript_received = pyqtSignal(str)
 
 class AntiGravityApp:
     def __init__(self):
@@ -68,30 +69,37 @@ class AntiGravityApp:
         if os.path.exists(icon_path):
             self.app.setWindowIcon(QIcon(icon_path))
 
-        self.hud        = HUDWindow(config_manager)
+        self.hud        = ShadowHUD(config_manager)
         self.settings   = SettingsWindow(self.hud)
         self.dispatcher = CommandDispatcher(self.hud)
 
         self.signals = VoiceSignal()
         self.signals.command_received.connect(self.handle_command)
         self.signals.response_ready.connect(self.finalize_response)
-        self.signals.status_update.connect(self.hud.set_status)
+        self.signals.status_update.connect(self._update_hud_status)
         self.signals.settings_requested.connect(self.settings.show)
+        self.signals.transcript_received.connect(self.hud.update_transcript)
 
-        self.listener = Listener(self.signals.command_received.emit, self.signals.status_update.emit)
+        self.listener = Listener(self.signals.command_received.emit, self.signals.status_update.emit, self.signals.transcript_received.emit)
 
         self.tray = TrayIcon(self.hud, self.app)
         self.tray.start()
         self.tray._open_settings    = self.signals.settings_requested.emit
         self.hud._settings_callback = self.signals.settings_requested.emit
+        self.hud._mute_callback     = self.listener.toggle_wake_word
 
         self._dispatch_pool  = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dispatch")
         self._active_cmd_id  = 0
 
         psutil.cpu_percent(interval=None)
-        self.stats_timer = QTimer()
-        self.stats_timer.timeout.connect(self.update_stats)
-        self.stats_timer.start(1500)
+        # Stats are now handled by ShadowHUD's internal timers
+        # No need for stats_timer here
+
+        # Initialize HUD status indicators
+        self.hud.set_status("STT", config_manager.get("stt_mode", "local"), "ok")
+        self.hud.set_status("LLM", config_manager.get("llm_model", "gpt-4o"), "ok")
+        self.hud.set_status("TTS", config_manager.get("tts_mode", "kokoro"), "ok")
+        self.hud.set_status("WAKE", "ON", "ok")
 
         # ── Reminders ─────────────────────────────────────────────────────────
         from commands.extra_cmds import TimerCommands
@@ -110,7 +118,8 @@ class AntiGravityApp:
         except Exception as e:
             print(f"[ERR] Failed to bind hotkeys: {e}")
 
-        self.hud.show_hud()
+        if config_manager.get("hud_visible_on_start", True):
+            self.hud.show_hud()
 
 
     def toggle_visibility(self) -> None:
@@ -120,17 +129,30 @@ class AntiGravityApp:
             self.hud.show_hud()
 
     def update_stats(self) -> None:
-        self.hud.update_stats(psutil.cpu_percent(interval=None), psutil.virtual_memory().percent)
+        pass # Handled by ShadowHUD internally
+
+    def _update_hud_status(self, status: str) -> None:
+        if status == "LISTENING":
+            self.hud.set_listening(True)
+        elif status == "THINKING":
+            self.hud.set_processing(True)
+        elif status == "IDLE":
+            self.hud.set_processing(False)
+            self.hud.set_listening(False)
+        elif status == "SPEAKING":
+            # Optional: handle speaking mode if needed
+            pass
 
     def handle_command(self, text: str) -> None:
         self.hud.show_hud()
         if text == "_WAKE_":
-            self.hud.set_status("LISTENING")
+            self.hud.set_listening(True)
             tts_engine.speak("Yes?")
             return
         print(f"\n{'='*50}\n[COMMAND] '{text}'")
-        self.hud.set_status("THINKING")
-        self.hud.set_command(text)
+        self.hud.set_processing(True)
+        self.hud.update_transcript(text)
+        self.last_command_text = text
         self._active_cmd_id += 1
         cmd_id = self._active_cmd_id
 
@@ -151,12 +173,12 @@ class AntiGravityApp:
         except RuntimeError: pass
 
     def finalize_response(self, response) -> None:
-        self.hud.set_status("SPEAKING")
+        self.hud.set_processing(False)
         if isinstance(response, str):
             emotion, clean = _extract_emotion(response)
             print(f"[RESPONSE] {clean}  (Emotion: {emotion})")
-            self.hud.set_emotion(emotion)
-            self.hud.set_response(clean)
+            self.hud.update_transcript(clean)
+            self.hud.add_log_entry(self.last_command_text if hasattr(self, "last_command_text") else "cmd", clean[:30]+"...")
             tts_engine.speak(response)
         else:
             full, first = "", True
@@ -164,15 +186,14 @@ class AntiGravityApp:
                 if not sentence: continue
                 if first:
                     emotion, _ = _extract_emotion(sentence)
-                    self.hud.set_emotion(emotion)
                     first = False
                 print(f"[STREAM] {sentence}")
                 full += sentence + " "
-                self.hud.set_response(_STRIP_TAGS_RE.sub("", full).strip())
+                self.hud.update_transcript(_STRIP_TAGS_RE.sub("", full).strip())
                 tts_engine.speak(sentence)
             print("[RESPONSE COMPLETE]")
         print(f"{'='*50}\n[LISTENING] Back to listening…")
-        self.hud.set_status("IDLE")
+        self._update_hud_status("IDLE")
 
     def run(self) -> None:
         try: self.app.exec()

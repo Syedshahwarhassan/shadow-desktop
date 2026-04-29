@@ -27,8 +27,21 @@ class TrayIcon:
         return image
 
     def _run_tray(self):
+        def set_opacity(v):
+            self.hud.setWindowOpacity(v)
+            from config_manager import config_manager
+            config_manager.set("hud_opacity", v)
+
         menu = pystray.Menu(
-            pystray.MenuItem('Show/Hide', self._toggle_hud),
+            pystray.MenuItem('Show HUD', lambda: self.hud.show_hud()),
+            pystray.MenuItem('Hide HUD', lambda: self.hud.hide_hud()),
+            pystray.MenuItem('HUD Opacity', pystray.Menu(
+                pystray.MenuItem('20%', lambda: set_opacity(0.2)),
+                pystray.MenuItem('40%', lambda: set_opacity(0.4)),
+                pystray.MenuItem('60%', lambda: set_opacity(0.6)),
+                pystray.MenuItem('80%', lambda: set_opacity(0.8)),
+                pystray.MenuItem('100%', lambda: set_opacity(1.0)),
+            )),
             pystray.MenuItem('Settings', self._open_settings),
             pystray.MenuItem('Restart', self._restart),
             pystray.MenuItem('Exit', self._exit)

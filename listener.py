@@ -37,11 +37,12 @@ _JOIN_TIMEOUT = 0.2  # brief wait for the slower recognizer
 
 
 class Listener:
-    def __init__(self, callback, status_callback=None):
+    def __init__(self, callback, status_callback=None, transcript_callback=None):
         self.recognizer   = sr.Recognizer()
         self.microphone   = sr.Microphone()
         self.callback     = callback
         self.status_callback = status_callback
+        self.transcript_callback = transcript_callback
         self.is_listening = False
         self._stop_fn:    object = None
         self._audio_queue: queue.Queue = queue.Queue()
@@ -54,6 +55,7 @@ class Listener:
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.pause_threshold          = 0.55
         self.recognizer.non_speaking_duration    = 0.35
+        self.wake_word_enabled = True
 
         print("[INIT] Calibrating microphone…")
         with self.microphone as source:
@@ -61,6 +63,11 @@ class Listener:
         print("[INIT] Microphone ready.")
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def toggle_wake_word(self) -> bool:
+        self.wake_word_enabled = not self.wake_word_enabled
+        print(f"[LISTENER] Wake word {'enabled' if self.wake_word_enabled else 'disabled'}")
+        return self.wake_word_enabled
 
     def start(self) -> None:
         self.is_listening = True
@@ -109,6 +116,9 @@ class Listener:
             text_en, text_ur = self._recognize_parallel(audio)
             raw_text = text_en if text_en else text_ur
             
+            if self.transcript_callback and raw_text:
+                self.transcript_callback(raw_text)
+
             if not raw_text:
                 print("[STT] Silence or unrecognized audio.")
                 if self.status_callback:
@@ -130,6 +140,9 @@ class Listener:
                 continue
 
             # ── Normal mode ───────────────────────────────────────────────────
+            if not self.wake_word_enabled and time.time() >= self.session_active_until:
+                continue
+
             matched = self._find_wake(text_en, text_ur, wake_word)
 
             if matched:

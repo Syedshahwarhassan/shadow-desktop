@@ -39,6 +39,8 @@ URDU_MAP = {
     # Close
     "band karo":    "close",
     "band":         "close",
+    "shut off":     "close",
+    "turn off":     "close",
     "بند کرو":       "close",
     "بند":          "close",
     # Volume
@@ -267,15 +269,15 @@ class CommandDispatcher:
             if len(parts) > 1:
                 # Verbs/Keywords that indicate a NEW command intent
                 action_verbs = {
-                    "open", "kholo", "launch", "start", "run", "chalao", "kho",
-                    "close", "band", "exit", "quit",
+                    "open", "opening", "kholo", "launch", "start", "run", "chalao", "kho",
+                    "close", "closing", "band", "exit", "quit",
                     "create", "make", "banao", "likho", "take",
-                    "search", "find", "google", "dhundho", "talash",
-                    "play", "bajao", "sunao", "gana",
+                    "search", "searching", "find", "google", "dhundho", "talash",
+                    "play", "playing", "bajao", "sunao", "gana",
                     "volume", "brightness", "awaaz", "mute",
                     "screenshot", "capture",
                     "shutdown", "restart", "reboot", "lock",
-                    "type", "press", "click", "mouse", "scroll",
+                    "type", "typing", "press", "click", "mouse", "scroll",
                     "weather", "mausam", "time", "waqt", "quote", "joke", "latifa", "news",
                     "timer", "alarm", "remind", "yad", "reminder",
                     "translate", "ip", "speed", "safai", "clean", "empty",
@@ -426,7 +428,8 @@ class CommandDispatcher:
 
         # ── Settings ──────────────────────────────────────────────────────────
         if any(k in text for k in ["open settings", "open setting", "show settings", "show setting", "settings open", "setting open"]):
-            self.hud.open_settings()
+            if hasattr(self.hud, "_settings_callback"):
+                self.hud._settings_callback()
             return "Zaroor, settings open kar di hain."
 
         # ── Media & Navigation ────────────────────────────────────────────────
@@ -490,7 +493,7 @@ class CommandDispatcher:
 
         # ── Open app ─────────────────────────────────────────────────────────
         # Matches: "open X", "launch X", "start X", "X open", "X chalao"
-        triggers = ["open", "launch", "start", "run"]
+        triggers = ["open", "opening", "launch", "start", "run"]
         for trigger in triggers:
             if trigger in text:
                 # Case 1: "open notepad" (Trigger first)
@@ -551,6 +554,11 @@ class CommandDispatcher:
             import winshell
             docs = winshell.folder("personal")
             return AdvancedCommands.organize_folder(docs)
+
+        if any(k in text for k in ["organize desktop", "desktop organized", "desktop organize", "desktop saaf karo"]):
+            import winshell
+            desktop = winshell.desktop()
+            return AdvancedCommands.organize_folder(desktop)
 
         if any(k in text for k in ["clean temp", "temp saaf karo", "faltu files khatam karo"]):
             return AdvancedCommands.clean_temp_files()
@@ -638,7 +646,7 @@ class CommandDispatcher:
             return DesktopCommands.empty_trash()
 
         # ── Search ────────────────────────────────────────────────────────────
-        if any(k in text for k in ["search", "find", "google", "talash karo", "dhundho"]):
+        if any(k in text for k in ["search", "searching", "find", "google", "talash karo", "dhundho"]):
             query = re.sub(r"(search for|search on google|search|find|google|talash karo|dhundho)", "", text).strip()
             return WebCommands.search_google(query)
 
@@ -764,7 +772,7 @@ class CommandDispatcher:
                 if not label: label = "reminder"
                 
                 # The HUD/TTS callback fires on the timer thread
-                return TimerCommands.set_timer(secs, label, on_fire=lambda msg: self.hud.set_response(f"[EXCITED] {msg}"))
+                return TimerCommands.set_timer(secs, label, on_fire=lambda msg: self.hud.update_transcript(f"[TIMER] {msg}"))
             return "Zaroor, lekin kitni der baad? (e.g. 'set timer for 5 minutes' ya 'remind me at 5pm')"
 
         if "list timers" in text or "active timers" in text or "show timers" in text:
