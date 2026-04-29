@@ -4,7 +4,7 @@ hud.py — Futuristic AR HUD for Shadow Assistant.
 
 import sys
 import time
-import psutil
+import time
 import ctypes
 from PyQt6.QtWidgets import (
     QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, 
@@ -12,12 +12,12 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QPushButton
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, QRect, QPoint, QPropertyAnimation, 
+    Qt, QTimer, QRect, QPoint, QPointF, QPropertyAnimation, 
     QEasingCurve, pyqtProperty, QSize, QDateTime
 )
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QFont, QBrush, 
-    QLinearGradient, QAction
+    QLinearGradient, QAction, QPainterPath
 )
 
 class HUDLabel(QLabel):
@@ -77,6 +77,189 @@ class HUDPanel(QFrame):
         p.setPen(QPen(QColor(255, 255, 255, 10), 1))
         p.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
 
+class FaceWidget(QWidget):
+    """Animated, expressive AI face."""
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(100, 100)
+        self.emotion = "IDLE"
+        self.state = "IDLE"
+        self.color = QColor("#1D9E75")
+        
+        # Eyes and mouth geometry (base values, scaled in paintEvent)
+        self.base_eye_size = 10
+        self.base_eye_spacing = 30
+        self.base_mouth_width = 40
+        
+        # Animation properties
+        self.blink_y = 1.0 # 0.0 to 1.0 (closed to open)
+        self.expression_timer = QTimer(self)
+        self.expression_timer.timeout.connect(self.update)
+        self.expression_timer.start(30)
+        
+        self.pulse = 0.0
+        self.pulse_dir = 1
+        
+        # Blink timer
+        self.blink_timer = QTimer(self)
+        self.blink_timer.timeout.connect(self.do_blink)
+        self.blink_timer.start(4000)
+
+    def do_blink(self):
+        self.blink_anim = QPropertyAnimation(self, b"blink_y_val")
+        self.blink_anim.setDuration(150)
+        self.blink_anim.setStartValue(1.0)
+        self.blink_anim.setEndValue(0.0)
+        self.blink_anim.setKeyValueAt(0.5, 0.0)
+        self.blink_anim.setEndValue(1.0)
+        self.blink_anim.start()
+
+    @pyqtProperty(float)
+    def blink_y_val(self): return self.blink_y
+    @blink_y_val.setter
+    def blink_y_val(self, v): self.blink_y = v
+
+    def set_emotion(self, emotion: str):
+        self.emotion = emotion.upper()
+        if self.emotion == "ANGRY": self.color = QColor("#FF4B4B")
+        elif self.emotion == "EXCITED": self.color = QColor("#7F77DD")
+        elif self.emotion == "SAD": self.color = QColor("#4a5568")
+        else: self.color = QColor("#1D9E75")
+        self.update()
+
+    def set_state(self, state: str):
+        self.state = state.upper()
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        center = self.rect().center()
+        # Scale factor based on height
+        s = min(self.width(), self.height()) / 120.0
+        
+        # Pulse for Idle/Listening
+        if self.state in ["IDLE", "LISTENING"]:
+            self.pulse += self.pulse_dir * 0.02
+            if self.pulse >= 1.0: self.pulse_dir = -1
+            elif self.pulse <= 0.0: self.pulse_dir = 1
+        else:
+            self.pulse = 0
+            
+        # Draw subtle glass face boundary
+        face_path = QPainterPath()
+        fw, fh = 90 * s, 100 * s
+        face_path.addRoundedRect(center.x() - fw/2, center.y() - fh/2, fw, fh, 30*s, 30*s)
+        p.setPen(QPen(QColor(self.color.red(), self.color.green(), self.color.blue(), 15), 1))
+        p.setBrush(QColor(10, 12, 15, 20))
+        p.drawPath(face_path)
+
+        # Draw Glow
+        glow_size = (60 * s) + (self.pulse * 10 * s)
+        grad = QLinearGradient(center.x(), center.y() - glow_size, center.x(), center.y() + glow_size)
+        c = self.color
+        grad.setColorAt(0, QColor(c.red(), c.green(), c.blue(), 20))
+        grad.setColorAt(1, QColor(0, 0, 0, 0))
+        p.setBrush(grad)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(center, int(glow_size), int(glow_size))
+
+        # Draw Eyes
+        eye_y = center.y() - (10 * s)
+        eye_spacing = self.base_eye_spacing * s
+        eye_lx = center.x() - eye_spacing
+        eye_rx = center.x() + eye_spacing
+        eye_size = self.base_eye_size * s
+        
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(self.color)
+        
+        # Adjust eyes based on emotion
+        eye_h = eye_size * self.blink_y
+        if self.emotion == "HAPPY":
+            self.draw_curved_eye(p, QPointF(float(eye_lx), float(eye_y)), True, eye_size)
+            self.draw_curved_eye(p, QPointF(float(eye_rx), float(eye_y)), True, eye_size)
+        elif self.emotion == "ANGRY":
+            self.draw_slanted_eye(p, QPointF(float(eye_lx), float(eye_y)), True, eye_size)
+            self.draw_slanted_eye(p, QPointF(float(eye_rx), float(eye_y)), False, eye_size)
+        elif self.emotion == "SAD":
+            self.draw_slanted_eye(p, QPointF(float(eye_lx), float(eye_y)), False, eye_size)
+            self.draw_slanted_eye(p, QPointF(float(eye_rx), float(eye_y)), True, eye_size)
+        elif self.state == "THINKING":
+            angle = (time.time() * 500) % 360
+            self.draw_spinning_eye(p, QPointF(float(eye_lx), float(eye_y)), angle, eye_size)
+            self.draw_spinning_eye(p, QPointF(float(eye_rx), float(eye_y)), angle, eye_size)
+        else:
+            for x_pos in [eye_lx, eye_rx]:
+                eye_path = QPainterPath()
+                ew, eh = eye_size * 1.2, eye_h
+                eye_path.addEllipse(QPointF(float(x_pos), float(eye_y)), float(ew), float(eh))
+                p.fillPath(eye_path, self.color)
+                # Inner pupil
+                p.setBrush(QColor(255, 255, 255, 80))
+                p.drawEllipse(QPointF(float(x_pos), float(eye_y - 2*s)), 2.0*s, 2.0*s)
+                p.setBrush(self.color)
+
+        # Draw Mouth
+        mouth_y = center.y() + (15 * s)
+        p.setPen(QPen(self.color, 2*s, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        
+        path = QPainterPath()
+        mw = self.base_mouth_width * s / 2
+        if self.emotion == "HAPPY":
+            path.moveTo(center.x() - mw, mouth_y)
+            path.quadTo(center.x(), mouth_y + (10*s), center.x() + mw, mouth_y)
+        elif self.emotion == "SAD":
+            path.moveTo(center.x() - mw, mouth_y + (5*s))
+            path.quadTo(center.x(), mouth_y - (5*s), center.x() + mw, mouth_y + (5*s))
+        elif self.emotion == "ANGRY":
+            p.drawLine(QPointF(center.x() - mw*0.8, mouth_y + (2*s)), QPointF(center.x() + mw*0.8, mouth_y + (2*s)))
+        elif self.emotion == "EXCITED":
+            path.moveTo(center.x() - mw, mouth_y)
+            path.quadTo(center.x(), mouth_y + (15*s), center.x() + mw, mouth_y)
+            p.setBrush(QColor(self.color.red(), self.color.green(), self.color.blue(), 40))
+            path.closeSubpath()
+        elif self.emotion == "CURIOUS":
+            path.moveTo(center.x() - mw*0.7, mouth_y + (2*s))
+            path.quadTo(center.x() + (5*s), mouth_y + (5*s), center.x() + mw*0.7, mouth_y)
+        else: # CALM / IDLE
+            p.drawLine(QPointF(center.x() - mw*0.6, mouth_y + (2*s)), QPointF(center.x() + mw*0.6, mouth_y + (2*s)))
+            
+        p.drawPath(path)
+
+    def draw_curved_eye(self, p, pos, up, size):
+        path = QPainterPath()
+        w, h = size*1.25, size*0.75
+        if up:
+            path.moveTo(pos.x() - w/2, pos.y() + h/2)
+            path.quadTo(pos.x(), pos.y() - h/2, pos.x() + w/2, pos.y() + h/2)
+        else:
+            path.moveTo(pos.x() - w/2, pos.y() - h/2)
+            path.quadTo(pos.x(), pos.y() + h/2, pos.x() + w/2, pos.y() - h/2)
+        p.drawPath(path)
+
+    def draw_slanted_eye(self, p, pos, inner_up, size):
+        points = []
+        w, h = size*1.25, size*0.75
+        if inner_up: # / \
+            points = [QPointF(pos.x()-w/2, pos.y()+h/2), QPointF(pos.x()+w/2, pos.y()-h/2)]
+        else: # \ /
+            points = [QPointF(pos.x()-w/2, pos.y()-h/2), QPointF(pos.x()+w/2, pos.y()+h/2)]
+        p.setPen(QPen(self.color, size*0.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(points[0], points[1])
+
+    def draw_spinning_eye(self, p, pos, angle, size):
+        p.setPen(QPen(self.color, size*0.2))
+        p.drawEllipse(pos, float(size), float(size))
+        import math
+        rad = math.radians(angle)
+        ex = pos.x() + math.cos(rad) * (size - 2)
+        ey = pos.y() + math.sin(rad) * (size - 2)
+        p.setBrush(self.color)
+        p.drawEllipse(QPointF(ex, ey), 2.0, 2.0)
+
 class ShadowHUD(QWidget):
     def __init__(self, config):
         super().__init__()
@@ -100,12 +283,12 @@ class ShadowHUD(QWidget):
                 ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE
             )
 
-        # Initial Size & Position
-        self.default_width = config.get("hud_width", 420)
-        self.default_height = config.get("hud_height", 320)
+        # Initial Size & Position — narrower, taller to fit stacked layout
+        self.default_width = config.get("hud_width", 300)
+        self.default_height = config.get("hud_height", 360)
         self.resize(self.default_width, self.default_height)
-        self.setMinimumSize(320, 240)
-        self.setMaximumSize(800, 600)
+        self.setMinimumSize(240, 280)
+        self.setMaximumSize(500, 700)
         
         self.restore_position()
         self.setWindowOpacity(1.0)
@@ -119,12 +302,12 @@ class ShadowHUD(QWidget):
         self.is_listening = False
         self.is_processing = False
         self.uptime_start = time.time()
-        self.status_indicators = {} # key -> (dot_color, value_label)
+        self.status_indicators = {}
 
         # Animation timers
         self.scanline_timer = QTimer(self)
         self.scanline_timer.timeout.connect(self.update_scanline)
-        self.scanline_timer.start(30) # ~33 fps
+        self.scanline_timer.start(30)
 
         self.pulse_timer = QTimer(self)
         self.pulse_timer.timeout.connect(self.update_pulse)
@@ -135,17 +318,8 @@ class ShadowHUD(QWidget):
         # UI Layout
         self.init_ui()
         
-        # Stat update timers
-        self.cpu_timer = QTimer(self)
-        self.cpu_timer.timeout.connect(self.update_cpu)
-        self.cpu_timer.start(1500)
-
-        self.mem_timer = QTimer(self)
-        self.mem_timer.timeout.connect(self.update_ram_net)
-        self.mem_timer.start(2000)
-
         self.clock_timer = QTimer(self)
-        self.clock_timer.timeout.connect(self.update_clock_uptime)
+        self.clock_timer.timeout.connect(self.update_clock)
         self.clock_timer.start(1000)
 
     def restore_position(self):
@@ -157,18 +331,18 @@ class ShadowHUD(QWidget):
         self.resize(w, h)
         
         if x == -1 or y == -1:
-            # Default to bottom-right corner
             screen = QApplication.primaryScreen().geometry()
             self.move(screen.width() - self.width() - 20, screen.height() - self.height() - 60)
         else:
             self.move(x, y)
 
     def init_ui(self):
-        self.main_layout = QGridLayout(self)
-        self.main_layout.setContentsMargins(1, 1, 1, 1)
-        self.main_layout.setSpacing(1)
+        # Single-column vertical layout: top bar → face → transcript
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(12, 12, 12, 12)
+        self.main_layout.setSpacing(6)
 
-        # Row 0: Top Bar
+        # ── Row 0: Top Bar ──────────────────────────────────────────────
         top_bar = HUDPanel()
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(10, 0, 10, 0)
@@ -193,62 +367,51 @@ class ShadowHUD(QWidget):
         top_layout.addStretch()
         top_layout.addWidget(self.mode_lbl)
         
-        self.main_layout.addWidget(top_bar, 0, 0, 1, 2)
+        self.main_layout.addWidget(top_bar)
 
-        # Row 1: Stat Panels
-        stats_widget = QWidget()
-        stats_layout = QHBoxLayout(stats_widget)
-        stats_layout.setContentsMargins(0, 0, 0, 0)
-        stats_layout.setSpacing(1)
-        
-        # CPU
-        cpu_panel = HUDPanel()
-        cpu_v = QVBoxLayout(cpu_panel)
-        cpu_v.addWidget(HUDLabel("CPU"))
-        self.cpu_val = HUDValue("0%")
-        cpu_v.addWidget(self.cpu_val)
-        self.cpu_sub = QLabel("0 cores · 0.0 GHz")
-        self.cpu_sub.setFont(QFont("Consolas", 8))
-        self.cpu_sub.setStyleSheet("color: #4a5568;")
-        cpu_v.addWidget(self.cpu_sub)
-        self.cpu_bar = HUDBar()
-        cpu_v.addWidget(self.cpu_bar)
-        stats_layout.addWidget(cpu_panel)
-        
-        # RAM
-        ram_panel = HUDPanel()
-        ram_v = QVBoxLayout(ram_panel)
-        ram_v.addWidget(HUDLabel("RAM", "#7F77DD"))
-        self.ram_val = HUDValue("0.0GB")
-        ram_v.addWidget(self.ram_val)
-        self.ram_sub = QLabel("of 0GB used")
-        self.ram_sub.setFont(QFont("Consolas", 8))
-        self.ram_sub.setStyleSheet("color: #4a5568;")
-        ram_v.addWidget(self.ram_sub)
-        self.ram_bar = HUDBar()
-        self.ram_bar.color = QColor("#7F77DD")
-        ram_v.addWidget(self.ram_bar)
-        stats_layout.addWidget(ram_panel)
-        
-        # NET
-        net_panel = HUDPanel()
-        net_v = QVBoxLayout(net_panel)
-        net_v.addWidget(HUDLabel("NET"))
-        self.net_val = HUDValue("0.0MB/s")
-        net_v.addWidget(self.net_val)
-        self.net_sub = QLabel("↑ 0.0 · ↓ 0.0 MB/s")
-        self.net_sub.setFont(QFont("Consolas", 8))
-        self.net_sub.setStyleSheet("color: #4a5568;")
-        net_v.addWidget(self.net_sub)
-        self.net_bar = HUDBar()
-        net_v.addWidget(self.net_bar)
-        stats_layout.addWidget(net_panel)
-        
-        self.main_layout.addWidget(stats_widget, 1, 0, 1, 2)
+        # ── Row 1: Face + buttons (centred) ────────────────────────────
+        face_panel = HUDPanel()
+        face_v = QVBoxLayout(face_panel)
+        face_v.setContentsMargins(5, 4, 5, 4)
+        face_v.setSpacing(4)
 
-        # Row 2: Transcript Panel
+        self.face = FaceWidget()
+        self.face.setFixedSize(140, 140)
+        face_v.addWidget(self.face, 0, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(4)
+        
+        hide_btn = QPushButton("HIDE")
+        hide_btn.setFont(QFont("Consolas", 7))
+        hide_btn.setStyleSheet(
+            "color: #4a5568; padding: 4px;"
+            "background: rgba(255,255,255,5);"
+            "border: 1px solid rgba(255,255,255,10);"
+        )
+        hide_btn.clicked.connect(self.hide_hud)
+        btn_layout.addWidget(hide_btn)
+        
+        mute_btn = QPushButton("MUTE")
+        mute_btn.setFont(QFont("Consolas", 7))
+        mute_btn.setStyleSheet(
+            "color: #4a5568; padding: 4px;"
+            "background: rgba(255,255,255,5);"
+            "border: 1px solid rgba(255,255,255,10);"
+        )
+        mute_btn.clicked.connect(self.toggle_mute)
+        btn_layout.addWidget(mute_btn)
+        self.mute_btn = mute_btn
+
+        face_v.addLayout(btn_layout)
+        self.main_layout.addWidget(face_panel)
+
+        # ── Row 2: Live Transcript (below the face) ────────────────────
         trans_panel = HUDPanel()
         trans_v = QVBoxLayout(trans_panel)
+        trans_v.setContentsMargins(8, 4, 8, 4)
+        trans_v.setSpacing(2)
+
         trans_header = QHBoxLayout()
         self.pulse_dot = QLabel("●")
         self.pulse_dot.setStyleSheet("color: #1D9E75;")
@@ -259,152 +422,60 @@ class ShadowHUD(QWidget):
         
         self.transcript_lbl = QLabel("Awaiting input...")
         self.transcript_lbl.setWordWrap(True)
-        self.transcript_lbl.setFont(QFont("Consolas", 12))
-        self.transcript_lbl.setStyleSheet("color: #a0aec0;")
+        self.transcript_lbl.setFont(QFont("Consolas", 10))
+        self.transcript_lbl.setStyleSheet("color: #a0aec0; padding: 4px 2px;")
+        self.transcript_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.transcript_lbl.setMinimumHeight(60)
         trans_v.addWidget(self.transcript_lbl)
-        trans_panel.setMinimumHeight(70)
-        self.main_layout.addWidget(trans_panel, 2, 0, 1, 2)
 
-        # Row 3: Command Log
-        log_panel = HUDPanel()
-        log_v = QVBoxLayout(log_panel)
-        log_v.addWidget(HUDLabel("COMMAND LOG", "#7F77DD"))
-        self.log_list = QListWidget()
-        self.log_list.setStyleSheet("""
-            QListWidget { background: transparent; border: none; color: #a0aec0; }
-            QListWidget::item { padding: 2px; }
-        """)
-        self.log_list.setFont(QFont("Consolas", 11))
-        self.log_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.log_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        log_v.addWidget(self.log_list)
-        log_panel.setMinimumHeight(60)
-        self.main_layout.addWidget(log_panel, 3, 0, 1, 2)
-
-        # Right Column (Column 2): Status Indicators
-        status_panel = HUDPanel()
-        status_panel.setFixedWidth(120)
-        self.status_v = QVBoxLayout(status_panel)
-        self.status_v.setContentsMargins(10, 10, 10, 10)
-        self.status_v.setSpacing(8)
-        
-        self.add_status_indicator("STT", "cloud", "ok")
-        self.add_status_indicator("LLM", "gpt-4o", "ok")
-        self.add_status_indicator("TTS", "kokoro", "ok")
-        self.add_status_indicator("MEM", "0 facts", "ok")
-        self.add_status_indicator("WAKE", "ON", "ok")
-        self.uptime_lbl = self.add_status_indicator("UPTIME", "00:00:00", "ok")
-        
-        self.status_v.addStretch()
-        
-        hide_btn = QPushButton("HIDE")
-        hide_btn.setFont(QFont("Consolas", 8))
-        hide_btn.setStyleSheet("color: #4a5568; background: rgba(255,255,255,5); border: 1px solid rgba(255,255,255,10);")
-        hide_btn.clicked.connect(self.hide_hud)
-        self.status_v.addWidget(hide_btn)
-        
-        mute_btn = QPushButton("MUTE")
-        mute_btn.setFont(QFont("Consolas", 8))
-        mute_btn.setStyleSheet("color: #4a5568; background: rgba(255,255,255,5); border: 1px solid rgba(255,255,255,10);")
-        mute_btn.clicked.connect(self.toggle_mute)
-        self.status_v.addWidget(mute_btn)
-        self.mute_btn = mute_btn
-        
-        self.main_layout.addWidget(status_panel, 1, 2, 3, 1)
+        self.main_layout.addWidget(trans_panel)
+        self.main_layout.setStretch(0, 0)  # top bar fixed
+        self.main_layout.setStretch(1, 0)  # face fixed
+        self.main_layout.setStretch(2, 1)  # transcript expands
 
     def add_status_indicator(self, key, value, state):
-        row = QHBoxLayout()
-        dot = QLabel("●")
-        color = "#1D9E75" if state == "ok" else "#BA7517" if state == "warn" else "#FF4B4B"
-        dot.setStyleSheet(f"color: {color}; font-size: 8px;")
-        
-        lbl = QLabel(key)
-        lbl.setFont(QFont("Consolas", 8))
-        lbl.setStyleSheet("color: #4a5568;")
-        
-        val = QLabel(value)
-        val.setFont(QFont("Consolas", 8))
-        val.setStyleSheet("color: #a0aec0;")
-        val.setAlignment(Qt.AlignmentFlag.AlignRight)
-        
-        row.addWidget(dot)
-        row.addWidget(lbl)
-        row.addStretch()
-        row.addWidget(val)
-        self.status_v.addLayout(row)
-        self.status_indicators[key] = (dot, val)
-        return val
+        return QLabel()
 
     # --- Public Methods ---
 
     def update_transcript(self, text: str):
-        # Highlight "shadow" (case-insensitive) in white bold (#e2e8f0)
         import re
-        highlighted = re.sub(r"(shadow)", r'<span style="color:#e2e8f0;"><b>\1</b></span>', text, flags=re.IGNORECASE)
+        highlighted = re.sub(
+            r"(shadow)",
+            r'<span style="color:#e2e8f0;"><b>\1</b></span>',
+            text, flags=re.IGNORECASE
+        )
         self.transcript_lbl.setText(highlighted)
 
     def add_log_entry(self, cmd: str, result: str):
-        now = QDateTime.currentDateTime().toString("HH:mm:ss")
-        # Format: {HH:MM:SS} {command} → {result}
-        # Colors: time=#2d3748, cmd=#7F77DD, result=#4a5568
-        entry_html = f'<span style="color:#2d3748;">{now}</span>  <span style="color:#7F77DD;">{cmd}</span>  <span style="color:#4a5568;">→  {result}</span>'
-        
-        item_widget = QLabel(entry_html)
-        item_widget.setFont(QFont("Consolas", 11))
-        item_widget.setStyleSheet("background: transparent;")
-        
-        from PyQt6.QtWidgets import QListWidgetItem
-        list_item = QListWidgetItem()
-        list_item.setSizeHint(QSize(self.log_list.width(), 25))
-        self.log_list.insertItem(0, list_item)
-        self.log_list.setItemWidget(list_item, item_widget)
-        
-        # Trim to last 6
-        while self.log_list.count() > 6:
-            self.log_list.takeItem(self.log_list.count() - 1)
-            
-        # Simple fade-in effect for the new item
-        self.fade_list_item(item_widget)
-
-    def fade_list_item(self, widget):
-        # Using windowOpacity on a child widget won't work, so we use QGraphicsOpacityEffect
-        from PyQt6.QtWidgets import QGraphicsOpacityEffect
-        opacity_effect = QGraphicsOpacityEffect(widget)
-        widget.setGraphicsEffect(opacity_effect)
-        
-        anim = QPropertyAnimation(opacity_effect, b"opacity")
-        anim.setDuration(200)
-        anim.setStartValue(0.0)
-        anim.setEndValue(1.0)
-        anim.start()
-        # Keep a reference to prevent GC
-        if not hasattr(self, "_anims"): self._anims = []
-        self._anims.append((anim, opacity_effect))
-        anim.finished.connect(lambda: self._anims.remove((anim, opacity_effect)) if (anim, opacity_effect) in self._anims else None)
+        pass
 
     def set_status(self, key: str, value: str, state: str = "ok"):
-        if key in self.status_indicators:
-            dot, val_lbl = self.status_indicators[key]
-            color = "#1D9E75" if state == "ok" else "#BA7517" if state == "warn" else "#FF4B4B"
-            dot.setStyleSheet(f"color: {color}; font-size: 8px;")
-            val_lbl.setText(str(value))
+        pass
 
     def set_listening(self, active: bool):
         self.is_listening = active
         if active:
             self.mode_lbl.setText("● LISTENING")
             self.mode_lbl.setStyleSheet("color: #1D9E75;")
+            self.face.set_state("LISTENING")
         else:
             self.mode_lbl.setText("● IDLE")
             self.mode_lbl.setStyleSheet("color: #4a5568;")
+            self.face.set_state("IDLE")
 
     def set_processing(self, active: bool):
         self.is_processing = active
         if active:
             self.mode_lbl.setText("● PROCESSING")
             self.mode_lbl.setStyleSheet("color: #BA7517;")
+            self.face.set_state("THINKING")
         else:
             self.set_listening(self.is_listening)
+
+    def set_emotion(self, emotion: str):
+        if hasattr(self, "face"):
+            self.face.set_emotion(emotion)
 
     def show_hud(self):
         print(f"[HUD] Showing HUD (Opacity: {self.config.get('hud_opacity', 0.92)})")
@@ -427,9 +498,12 @@ class ShadowHUD(QWidget):
     def toggle_mute(self):
         if hasattr(self, "_mute_callback"):
             is_enabled = self._mute_callback()
-            self.set_status("WAKE", "ON" if is_enabled else "OFF", "ok" if is_enabled else "warn")
             self.mute_btn.setText("UNMUTE" if not is_enabled else "MUTE")
-            self.mute_btn.setStyleSheet(f"color: {'#FF4B4B' if not is_enabled else '#4a5568'}; background: rgba(255,255,255,5); border: 1px solid rgba(255,255,255,10);")
+            self.mute_btn.setStyleSheet(
+                f"color: {'#FF4B4B' if not is_enabled else '#4a5568'};"
+                "background: rgba(255,255,255,5);"
+                "border: 1px solid rgba(255,255,255,10);"
+            )
 
     # --- Timers & Stats ---
 
@@ -449,58 +523,12 @@ class ShadowHUD(QWidget):
             self.pulse_dir = 1
         elif self.pulse_opacity >= 1.0:
             self.pulse_dir = -1
-        self.pulse_dot.setStyleSheet(f"color: rgba(29, 158, 117, {int(self.pulse_opacity*255)});")
+        self.pulse_dot.setStyleSheet(
+            f"color: rgba(29, 158, 117, {int(self.pulse_opacity*255)});"
+        )
 
-    def update_cpu(self):
-        try:
-            pct = psutil.cpu_percent(interval=None)
-            self.cpu_val.setText(f"{int(pct)}%")
-            self.cpu_bar.set_value(pct, QColor("#BA7517") if pct >= 70 else QColor("#1D9E75"))
-            cores = psutil.cpu_count()
-            freq = psutil.cpu_freq().current / 1000.0 if psutil.cpu_freq() else 0.0
-            self.cpu_sub.setText(f"{cores} cores · {freq:.1f} GHz")
-        except:
-            self.cpu_val.setText("n/a")
-
-    def update_ram_net(self):
-        try:
-            # Update MEM facts count
-            import json
-            import os
-            mem_file = os.path.join(os.path.dirname(__file__), "memory.json")
-            if os.path.exists(mem_file):
-                with open(mem_file, "r", encoding="utf-8") as f:
-                    mem_data = json.load(f)
-                    facts_count = len(mem_data.get("notes", []))
-                    self.set_status("MEM", f"{facts_count} facts", "ok")
-            
-            mem = psutil.virtual_memory()
-            used_gb = mem.used / 1e9
-            total_gb = mem.total / 1e9
-            self.ram_val.setText(f"{used_gb:.1f}GB")
-            self.ram_sub.setText(f"of {int(total_gb)}GB used")
-            self.ram_bar.set_value(mem.percent)
-            
-            # Net
-            net1 = psutil.net_io_counters()
-            time.sleep(0.1)
-            net2 = psutil.net_io_counters()
-            up = (net2.bytes_sent - net1.bytes_sent) / (1024 * 1024 * 0.1)
-            down = (net2.bytes_recv - net1.bytes_recv) / (1024 * 1024 * 0.1)
-            self.net_val.setText(f"{up+down:.1f}MB/s")
-            self.net_sub.setText(f"↑ {up:.1f} · ↓ {down:.1f} MB/s")
-            self.net_bar.set_value(min(100, (up+down)*10)) # scaling
-        except:
-            self.ram_val.setText("n/a")
-            self.net_val.setText("n/a")
-
-    def update_clock_uptime(self):
+    def update_clock(self):
         self.clock_lbl.setText(QDateTime.currentDateTime().toString("HH:mm:ss"))
-        uptime_sec = int(time.time() - self.uptime_start)
-        h = uptime_sec // 3600
-        m = (uptime_sec % 3600) // 60
-        s = uptime_sec % 60
-        self.uptime_lbl.setText(f"{h:02}:{m:02}:{s:02}")
 
     # --- Events ---
 
@@ -517,13 +545,9 @@ class ShadowHUD(QWidget):
         if self.config.get("hud_corners", True):
             p.setPen(QPen(QColor(29, 158, 117, 180), 2))
             l = 20
-            # Top-left
             p.drawLine(0, 0, l, 0); p.drawLine(0, 0, 0, l)
-            # Top-right
             p.drawLine(self.width(), 0, self.width()-l, 0); p.drawLine(self.width(), 0, self.width(), l)
-            # Bottom-left
             p.drawLine(0, self.height(), l, self.height()); p.drawLine(0, self.height(), 0, self.height()-l)
-            # Bottom-right
             p.drawLine(self.width(), self.height(), self.width()-l, self.height()); p.drawLine(self.width(), self.height(), self.width(), self.height()-l)
 
         # Scan Line
@@ -546,7 +570,6 @@ class ShadowHUD(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Check for resize handle (bottom-right 20x20 area)
             if event.pos().x() > self.width() - 20 and event.pos().y() > self.height() - 20:
                 self.resizing = True
             else:
@@ -567,13 +590,11 @@ class ShadowHUD(QWidget):
 
     def enterEvent(self, event):
         if not self.config.get("hud_dodge_enabled", True): return
-        # Dodge to the other side of the screen on hover
         if self.dragging or self.resizing: return
         
         screen = QApplication.primaryScreen().geometry()
         margin = 20
         
-        # Calculate target X (swap sides)
         if self.x() > (screen.width() / 2):
             target_x = margin
         else:

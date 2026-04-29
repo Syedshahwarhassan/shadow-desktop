@@ -18,7 +18,6 @@ elif getattr(sys.stderr, "encoding", "") != "utf-8":
         pass
 
 import re
-import psutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import QApplication
@@ -91,15 +90,8 @@ class AntiGravityApp:
         self._dispatch_pool  = ThreadPoolExecutor(max_workers=2, thread_name_prefix="dispatch")
         self._active_cmd_id  = 0
 
-        psutil.cpu_percent(interval=None)
-        # Stats are now handled by ShadowHUD's internal timers
-        # No need for stats_timer here
-
-        # Initialize HUD status indicators
-        self.hud.set_status("STT", config_manager.get("stt_mode", "local"), "ok")
-        self.hud.set_status("LLM", config_manager.get("llm_model", "gpt-4o"), "ok")
-        self.hud.set_status("TTS", config_manager.get("tts_mode", "kokoro"), "ok")
-        self.hud.set_status("WAKE", "ON", "ok")
+        # Initialize HUD
+        # Stats and logs are now removed as per user request.
 
         # ── Reminders ─────────────────────────────────────────────────────────
         from commands.extra_cmds import TimerCommands
@@ -177,8 +169,8 @@ class AntiGravityApp:
         if isinstance(response, str):
             emotion, clean = _extract_emotion(response)
             print(f"[RESPONSE] {clean}  (Emotion: {emotion})")
+            self.hud.set_emotion(emotion)
             self.hud.update_transcript(clean)
-            self.hud.add_log_entry(self.last_command_text if hasattr(self, "last_command_text") else "cmd", clean[:30]+"...")
             tts_engine.speak(response)
         else:
             full, first = "", True

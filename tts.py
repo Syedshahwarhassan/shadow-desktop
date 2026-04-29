@@ -1,19 +1,14 @@
 """
-tts.py — Industry-grade TTS engine for Shadow Voice Assistant.
+tts.py — High-performance, pipelined TTS engine for Shadow Voice Assistant.
 
-Optimisations over the previous version
-────────────────────────────────────────
-• Persistent asyncio event-loop running in a dedicated daemon thread.
-  edge_tts coroutines are posted with run_coroutine_threadsafe() instead
-  of calling asyncio.run() per sentence (~50 ms saved per utterance).
-• pygame.mixer initialised ONCE in __init__ (not on every speak call).
-• Dual rotating temp files (temp_0.mp3 / temp_1.mp3) eliminates file-lock
-  races when consecutive streaming sentences overlap.
-• Emotion regex compiled once at module import; emotion map stored as a
-  module-level dict — no per-call allocation.
-• pygame Channel-based playback (instead of music) gives precise per-channel
-  stop() without touching other audio streams.
-• _stop_flag uses threading.Event for reliable cross-thread signalling.
+Architecture
+────────────
+• Two-stage Pipeline:
+  1. Synthesis Worker: Takes text from _synth_queue, generates audio via edge-tts/pyttsx3.
+  2. Playback Worker: Takes audio buffers from _play_queue and plays them via pygame.
+• Background Synthesis: Synthesis of sentence N+1 happens while sentence N is playing.
+• In-Memory Processing: Uses io.BytesIO for audio buffers (no disk I/O hits).
+• Asyncio Integration: Persistent loop in daemon thread for edge_tts.
 """
 
 import threading
@@ -22,6 +17,8 @@ import subprocess
 import os
 import re
 import asyncio
+import io
+import time
 import edge_tts
 import pyttsx3
 import pygame
@@ -29,12 +26,12 @@ from config_manager import config_manager
 
 # ── Emotion map ───────────────────────────────────────────────────────────────
 _EMOTION_MAP: dict[str, dict[str, str]] = {
-    "[HAPPY]":   {"pitch": "+15Hz", "rate": "-5%"},
-    "[EXCITED]": {"pitch": "+25Hz", "rate": "+5%"},
-    "[SAD]":     {"pitch": "-15Hz", "rate": "-25%"},
-    "[ANGRY]":   {"pitch": "-5Hz",  "rate": "+10%"},
-    "[CURIOUS]": {"pitch": "+10Hz", "rate": "-10%"},
-    "[CALM]":    {"pitch": "+0Hz",  "rate": "-15%"},
+    "[HAPPY]":   {"pitch": "+5Hz", "rate": "+0%"},
+    "[EXCITED]": {"pitch": "+10Hz", "rate": "+5%"},
+    "[SAD]":     {"pitch": "-8Hz", "rate": "-15%"},
+    "[ANGRY]":   {"pitch": "-2Hz",  "rate": "+8%"},
+    "[CURIOUS]": {"pitch": "+4Hz", "rate": "-5%"},
+    "[CALM]":    {"pitch": "+0Hz",  "rate": "-10%"},
 }
 
 # Pre-compile tag-stripping pattern once
@@ -72,20 +69,19 @@ _TEMP_FILE = "temp.mp3"
 
 class TTSEngine:
     """
-    Production-grade TTS engine.
-
-    Priority chain: edge-tts (neural, Urdu) → pyttsx3 (offline) → PowerShell SAPI.
+    Pipelined TTS engine with decoupled synthesis and playback.
     """
 
     def __init__(self):
-        self._queue:   queue.Queue[str | None] = queue.Queue()
-        self._stop_evt = threading.Event()
+        self._synth_queue: queue.Queue[str | None] = queue.Queue()
+        self._play_queue:  queue.Queue[pygame.mixer.Sound | None] = queue.Queue()
+        self._stop_evt     = threading.Event()
         self._current_ps_process: subprocess.Popen | None = None
-        self.is_speaking: bool = False   # readable by listener to mute itself
+        self.is_speaking: bool = False
 
         # ── pygame mixer (initialised once) ───────────────────────────────────
         try:
-            pygame.mixer.pre_init(44100, -16, 2, 512)  # low-latency buffer
+            pygame.mixer.pre_init(44100, -16, 2, 512)
             pygame.mixer.init()
             self._channel: pygame.mixer.Channel = pygame.mixer.Channel(0)
         except Exception as e:
@@ -100,51 +96,46 @@ class TTSEngine:
             print(f"[TTS] pyttsx3 init failed: {e}")
             self.pyttsx_engine = None
 
-        # ── Persistent asyncio event loop in a daemon thread ─────────────────
+        # ── Asyncio loop for edge-tts ─────────────────────────────────────────
         self._loop = asyncio.new_event_loop()
-        loop_thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="tts-asyncio-loop"
-        )
-        loop_thread.start()
+        threading.Thread(target=self._run_loop, daemon=True, name="tts-loop").start()
 
-        # ── TTS worker thread ─────────────────────────────────────────────────
-        threading.Thread(
-            target=self._worker, daemon=True, name="tts-worker"
-        ).start()
+        # ── Pipeline Workers ──────────────────────────────────────────────────
+        threading.Thread(target=self._synthesis_worker, daemon=True, name="tts-synth").start()
+        threading.Thread(target=self._playback_worker, daemon=True, name="tts-play").start()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def speak(self, text: str) -> None:
-        if not text:
-            return
-        clean = re.sub(r"[*_`#]", "", text)  # strip markdown
-        self._queue.put(clean)
+        if not text: return
+        clean = re.sub(r"[*_`#]", "", text)
+        # Split long texts into sentences to enable pipelining immediately
+        # Increased threshold to 250 to keep natural phrasing together
+        if len(clean) > 250:
+            sentences = re.split(r'(?<=[.!?۔]) +', clean)
+            for s in sentences:
+                if s.strip(): self._synth_queue.put(s.strip())
+        else:
+            self._synth_queue.put(clean)
 
     def stop(self) -> None:
-        """Interrupt current speech and flush the queue."""
+        """Immediate interrupt and flush."""
         self._stop_evt.set()
         self.is_speaking = False
 
-        # Drain queue without blocking
-        try:
-            while True:
-                self._queue.get_nowait()
-        except queue.Empty:
-            pass
+        # Flush both queues
+        for q in (self._synth_queue, self._play_queue):
+            try:
+                while True: q.get_nowait()
+            except queue.Empty: pass
 
-        # Stop pygame channel
         if self._channel and pygame.mixer.get_init():
-            try:
-                self._channel.stop()
-            except Exception:
-                pass
+            try: self._channel.stop()
+            except Exception: pass
 
-        # Kill PowerShell process if running
         if self._current_ps_process:
-            try:
-                self._current_ps_process.kill()
-            except Exception:
-                pass
+            try: self._current_ps_process.kill()
+            except Exception: pass
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -153,29 +144,74 @@ class TTSEngine:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _worker(self) -> None:
+    def _synthesis_worker(self) -> None:
         while True:
-            text = self._queue.get()
-            if text is None:
-                break
+            text = self._synth_queue.get()
+            if text is None: break
 
             self._stop_evt.clear()
-            self.is_speaking = True
-            print(f"[TTS] Speaking: {text[:60]}{'...' if len(text) > 60 else ''}")
-
+            # Note: is_speaking is now managed by the playback worker
+            
             try:
-                self._speak_edge(text)
+                t0 = time.perf_counter()
+                audio_data = self._synthesize_edge(text)
+                if audio_data:
+                    sound = pygame.mixer.Sound(io.BytesIO(audio_data))
+                    ms = (time.perf_counter() - t0) * 1000
+                    print(f"[TTS] Synth complete: {ms:.0f}ms for '{text[:30]}...'")
+                    self._play_queue.put(sound)
+                else:
+                    raise RuntimeError("Edge-TTS synthesis failed")
+
             except Exception as e:
-                print(f"[TTS] edge-tts error: {e} — falling back to pyttsx3")
+                print(f"[TTS] Edge-TTS error: {e} — using fallback")
+                # Fallbacks are sequential and block synth worker (rare case)
                 try:
                     self._speak_pyttsx3(text)
-                except Exception as py_err:
-                    print(f"[TTS] pyttsx3 error: {py_err} — using PowerShell")
+                except Exception:
                     self._speak_powershell(text)
+
+    def _playback_worker(self) -> None:
+        while True:
+            sound = self._play_queue.get()
+            if sound is None: break
+
+            if self._stop_evt.is_set(): continue
+
+            self.is_speaking = True
+            try:
+                self._channel.play(sound)
+                # Minimize polling delay for smoother transitions
+                while self._channel.get_busy():
+                    if self._stop_evt.is_set():
+                        self._channel.stop()
+                        break
+                    time.sleep(0.001) 
             finally:
-                # Ensure we reset speaking state if queue is empty or stop was requested
-                if self._queue.empty() or self._stop_evt.is_set():
+                if self._play_queue.empty():
                     self.is_speaking = False
+
+    def _synthesize_edge(self, text: str) -> bytes | None:
+        params, clean = _extract_emotion(text)
+        
+        async def _task():
+            comm = edge_tts.Communicate(
+                text=clean,
+                voice="ur-PK-AsadNeural",
+                rate=params["rate"],
+                pitch=params["pitch"],
+            )
+            data = b""
+            async for chunk in comm.stream():
+                if chunk["type"] == "audio":
+                    data += chunk["data"]
+            return data
+
+        future = asyncio.run_coroutine_threadsafe(_task(), self._loop)
+        try:
+            return future.result(timeout=10)
+        except Exception:
+            return None
 
     def _setup_pyttsx(self, engine: pyttsx3.Engine) -> None:
         voices  = engine.getProperty("voices")
@@ -184,12 +220,12 @@ class TTSEngine:
 
         selected = None
         for v in voices:
-            if any(n in v.name for n in ("Kalpana", "Heera", "Uzma")):
+            if any(n in v.name for n in ("David", "Asad", "Guy", "Christopher")):
                 selected = v.id
                 break
         if not selected:
             for v in voices:
-                if any(n in v.name for n in ("Zira", "Hazel", "Female")):
+                if any(n in v.name for n in ("Male", "James", "Mark")):
                     selected = v.id
                     break
         if selected:
@@ -197,39 +233,6 @@ class TTSEngine:
         engine.setProperty("rate", rate)
         engine.setProperty("volume", volume)
 
-    # ── edge-tts (primary) ────────────────────────────────────────────────────
-
-    def _speak_edge(self, text: str) -> None:
-        params, clean = _extract_emotion(text)
-
-        async def _synthesise():
-            comm = edge_tts.Communicate(
-                text=clean,
-                voice="ur-PK-UzmaNeural",
-                rate=params["rate"],
-                pitch=params["pitch"],
-            )
-            await comm.save(_TEMP_FILE)
-
-        # Post to persistent loop — no new event loop created
-        future = asyncio.run_coroutine_threadsafe(_synthesise(), self._loop)
-        future.result(timeout=15)  # block worker thread until done
-
-        if self._stop_evt.is_set():
-            return
-
-        if not self._channel or not pygame.mixer.get_init():
-            raise RuntimeError("pygame mixer unavailable")
-
-        sound = pygame.mixer.Sound(_TEMP_FILE)
-        self._channel.play(sound)
-
-        # Poll with stop-event awareness
-        while self._channel.get_busy():
-            if self._stop_evt.is_set():
-                self._channel.stop()
-                return
-            pygame.time.wait(20)   # 20 ms polling — CPU-friendly
 
     # ── pyttsx3 (offline fallback) ────────────────────────────────────────────
 
@@ -263,7 +266,7 @@ class TTSEngine:
             f"Add-Type -AssemblyName System.Speech; "
             f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
             f"foreach ($v in $s.GetInstalledVoices()) {{ "
-            f"  if ($v.VoiceInfo.Name -match 'Kalpana|Heera|Uzma') {{ $s.SelectVoice($v.VoiceInfo.Name); break }} }}; "
+            f"  if ($v.VoiceInfo.Name -match 'David|Asad|Guy|Christopher') {{ $s.SelectVoice($v.VoiceInfo.Name); break }} }}; "
             f"$s.Rate = {ps_rate}; $s.Speak('{safe}')"
         ]
         try:
