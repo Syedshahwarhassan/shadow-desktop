@@ -63,6 +63,7 @@ class AntiGravityApp:
     def __init__(self):
         self.app        = QApplication(sys.argv)
         self.app.setApplicationName("Shadow")
+        self.app.setQuitOnLastWindowClosed(False)
         
         icon_path = os.path.join(os.path.dirname(__file__), "assets", "logo.ico")
         if os.path.exists(icon_path):
@@ -95,7 +96,13 @@ class AntiGravityApp:
 
         # ── Reminders ─────────────────────────────────────────────────────────
         from commands.extra_cmds import TimerCommands
-        TimerCommands.load_reminders(on_fire_callback=lambda msg: tts_engine.speak(f"[EXCITED] {msg}"))
+        def _global_reminder_callback(msg):
+            # Use signal for thread-safe UI update
+            if hasattr(self.hud, "reminder_signal"):
+                self.hud.reminder_signal.emit(msg)
+            tts_engine.speak(f"[EXCITED] {msg}")
+
+        TimerCommands.load_reminders(on_fire_callback=_global_reminder_callback)
         tts_engine.speak("System online. All systems operational.")
         self.listener.start()
         

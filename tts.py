@@ -78,6 +78,7 @@ class TTSEngine:
         self._stop_evt     = threading.Event()
         self._current_ps_process: subprocess.Popen | None = None
         self.is_speaking: bool = False
+        self.is_muted: bool = False
 
         # ── pygame mixer (initialised once) ───────────────────────────────────
         try:
@@ -107,7 +108,7 @@ class TTSEngine:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def speak(self, text: str) -> None:
-        if not text: return
+        if not text or self.is_muted: return
         clean = re.sub(r"[*_`#]", "", text)
         # Split long texts into sentences to enable pipelining immediately
         # Increased threshold to 250 to keep natural phrasing together
@@ -136,6 +137,12 @@ class TTSEngine:
         if self._current_ps_process:
             try: self._current_ps_process.kill()
             except Exception: pass
+
+    def set_muted(self, state: bool) -> None:
+        """Set the mute state of the TTS engine."""
+        self.is_muted = state
+        if state:
+            self.stop() # Stop any ongoing speech if muting
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

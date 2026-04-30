@@ -51,16 +51,31 @@ class Listener:
         # Thread pool reused across all recognition tasks
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="stt")
 
+        # ── Vosk Offline Fallback ─────────────────────────────────────────────
+        self.vosk_model = None
+        try:
+            import os
+            from vosk import Model as VoskModel
+            model_path = os.path.join(os.path.dirname(__file__), "models", "vosk-model-small-en-us-0.15")
+            if os.path.exists(model_path):
+                self.vosk_model = VoskModel(model_path)
+                print("[INIT] Vosk offline model loaded.")
+            else:
+                print(f"[INIT] Vosk model not found at {model_path}")
+        except Exception as e:
+            print(f"[INIT] Vosk initialization failed: {e}")
+
         self.recognizer.energy_threshold         = 150
         self.recognizer.dynamic_energy_threshold = True
-        self.recognizer.pause_threshold          = 0.55
-        self.recognizer.non_speaking_duration    = 0.35
+        self.recognizer.pause_threshold          = 1.2
+        self.recognizer.non_speaking_duration    = 0.8
         self.wake_word_enabled = True
 
         print("[INIT] Calibrating microphone…")
         with self.microphone as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
         print("[INIT] Microphone ready.")
+
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -171,12 +186,20 @@ class Listener:
                     print(f"[LISTENER ERR] Callback failure: {e}")
 
     def _find_wake(self, text_en: str, text_ur: str, wake_word: str) -> str:
+        # Load custom variants from config on every check to allow runtime changes
+        custom_variants = config_manager.get("wake_word_variants", [])
+        if isinstance(custom_variants, str):
+            custom_variants = [custom_variants]
+        
+        # Combine hardcoded variants with user-defined ones
+        all_variants = WAKE_WORD_VARIANTS.union(set(v.lower() for v in custom_variants))
+        
         for text in (text_en, text_ur):
             if not text:
                 continue
             if wake_word in text:
                 return text
-            for variant in WAKE_WORD_VARIANTS:
+            for variant in all_variants:
                 if variant in text:
                     print(f"  -> Wake variant matched: '{variant}'")
                     return text.replace(variant, wake_word, 1)
@@ -202,11 +225,25 @@ class Listener:
         fut_ur = self._pool.submit(_recog, "ur-PK", "ur")
 
         done.wait(timeout=_STT_TIMEOUT)
-        # if not done.is_set():
-        #     print(f"[STT] Timeout after {_STT_TIMEOUT}s — no result from Google")
+
+        # ── Vosk Fallback (if Google failed) ──────────────────────────────────
+        if not done.is_set() and self.vosk_model:
+            try:
+                print("[STT] Google failed or timed out — trying Vosk offline...")
+                results["en"] = self.recognizer.recognize_vosk(audio).lower()
+                # Vosk returns a JSON string like {"text": "..."}
+                import json
+                try:
+                    res_json = json.loads(results["en"])
+                    results["en"] = res_json.get("text", "")
+                except Exception:
+                    pass
+                if results["en"]:
+                    done.set()
+            except Exception as e:
+                print(f"[STT] Vosk failed: {e}")
 
         # Brief extra wait so the slower recognizer can still contribute.
-        # TimeoutError is expected when one language is slow — swallow it.
         for fut in (fut_en, fut_ur):
             if not fut.done():
                 try:
@@ -215,3 +252,4 @@ class Listener:
                     pass
 
         return results["en"], results["ur"]
+

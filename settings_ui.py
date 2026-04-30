@@ -67,6 +67,7 @@ class SettingsWindow(QWidget):
         self.hud = hud
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFixedSize(700, 550)
         
         self.layout = QVBoxLayout(self)

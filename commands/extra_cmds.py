@@ -295,11 +295,13 @@ class TimerCommands:
         if on_fire_callback:
             cls._on_fire_callback = on_fire_callback
             
-        if not os.path.exists(cls._reminders_file):
+        if not os.path.exists(cls._reminders_file) or os.path.getsize(cls._reminders_file) == 0:
             return
         try:
             with open(cls._reminders_file, "r") as f:
-                data = json.load(f)
+                content = f.read().strip()
+                if not content: return
+                data = json.loads(content)
             
             # Cancel existing timers to avoid duplicates on reload
             for t in cls._timers:
@@ -308,13 +310,26 @@ class TimerCommands:
             cls._timers = []
             
             now = datetime.now()
+            missed = []
             for item in data:
                 fires_at = datetime.fromisoformat(item["fires_at"])
+                label = item["label"]
                 if fires_at > now:
-                    label = item["label"]
                     # Calculate remaining seconds
                     secs = (fires_at - now).total_seconds()
                     cls.set_timer(secs, label, cls._on_fire_callback, save=False)
+                else:
+                    # Missed while app was off (if within last 24 hours, otherwise ignore as stale)
+                    if (now - fires_at).total_seconds() < 86400:
+                        missed.append(label)
+            
+            if missed:
+                msg = f"Aapke kuch reminders miss ho gaye hain: {', '.join(missed)}"
+                print(f"[TIMER] Missed: {msg}")
+                if callable(cls._on_fire_callback):
+                    # Delay slightly to let system stabilize
+                    threading.Timer(2.0, lambda: cls._on_fire_callback(msg)).start()
+
             print(f"[TIMER] Loaded {len(cls._timers)} active reminders.")
         except Exception as e:
             print(f"[TIMER] Load error: {e}")
@@ -354,9 +369,23 @@ class TimerCommands:
             return "Abhi koi active reminders nahi hain."
         lines = [
             f"  - {t['label']} → {t['fires_at'].strftime('%I:%M %p')}"
-            for t in active
+            for t in sorted(active, key=lambda x: x["fires_at"])
         ]
         return "Active reminders:\n" + "\n".join(lines)
+
+    @classmethod
+    def get_active_data(cls):
+        """Returns a list of dicts for HUD display."""
+        now = datetime.now()
+        return [
+            {
+                "label": t["label"],
+                "time": t["fires_at"].strftime("%I:%M %p"),
+                "remaining": str(t["fires_at"] - now).split(".")[0] # HH:MM:SS
+            }
+            for t in sorted(cls._timers, key=lambda x: x["fires_at"])
+            if t["fires_at"] > now
+        ]
 
     @staticmethod
     def parse_duration(text: str) -> int | None:
@@ -372,46 +401,61 @@ class TimerCommands:
         for u, e in urdu_time_map.items():
             text = text.replace(u, e)
 
-        # 1. Try absolute time patterns: "at 2pm", "at 14:30", "at 5"
-        # Pattern: (at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?
-        abs_match = re.search(r"(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text)
+        # 1. First priority: Relative durations ("in 5 mins", "after 2 hours")
+        # We look for explicit "in" or "after" or units to avoid misinterpreting "at 5" as "5 seconds"
+        total = 0
+        found_rel = False
+        rel_patterns = re.findall(r"(\d+)\s*(hour|hr|minute|min|second|sec)s?", text)
+        if rel_patterns:
+            for value, unit in rel_patterns:
+                v = int(value)
+                if unit.startswith("h"): total += v * 3600
+                elif unit.startswith("m"): total += v * 60
+                else: total += v
+            found_rel = True
+            
+        if found_rel:
+            return total
+
+        # 2. Second priority: Absolute time patterns: "at 2pm", "at 14:30", "at 5"
+        # We look for "at" or "baje" or specific time formats
+        abs_match = re.search(r"(?:at\s+|baje\s+|set\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|o'clock)?", text)
         if abs_match:
+            # Check if this was just a number without "at" or "pm" - might be noise
+            # unless "at" or "pm/am" or "o'clock" is present.
+            has_trigger = any(x in text for x in ["at ", "baje", "am", "pm", "clock"])
+            if not has_trigger and not abs_match.group(2): # Just a number like "5"
+                return None
+                
             hour = int(abs_match.group(1))
             minute = int(abs_match.group(2)) if abs_match.group(2) else 0
             meridiem = abs_match.group(3)
             
-            # Contextual meridiem if missing (e.g. "at 5" usually means 5pm if it's currently afternoon)
-            if not meridiem:
-                now_hour = datetime.now().hour
-                if hour <= 12:
-                    if hour < now_hour % 12: # Passed today, assume tomorrow or pm
-                        meridiem = "pm" if now_hour < 12 else "am" # actually complex
-                    else:
-                        meridiem = "am" if hour > 6 else "pm" # basic guess
-            
-            if meridiem == "pm" and hour < 12: hour += 12
-            if meridiem == "am" and hour == 12: hour = 0
+            if meridiem == "o'clock": meridiem = None
             
             now = datetime.now()
-            target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # Contextual meridiem if missing
+            if not meridiem:
+                if hour <= 12:
+                    # Smart guess: if hour is 1-7, usually means PM if it's currently day.
+                    # Or just pick the next occurrence of that hour.
+                    t1 = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if t1 <= now: t1 += timedelta(hours=12) # Try PM
+                    if t1 <= now: t1 += timedelta(hours=12) # Try tomorrow AM
+                    target = t1
+                else: # 13-23
+                    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            else:
+                if meridiem == "pm" and hour < 12: hour += 12
+                if meridiem == "am" and hour == 12: hour = 0
+                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            
             if target <= now:
                 target += timedelta(days=1)
             
             return int((target - now).total_seconds())
 
-        # 2. Existing relative duration logic
-        total = 0
-        found = False
-        for value, unit in re.findall(r"(\d+)\s*(hour|hr|minute|min|second|sec)s?", text):
-            v = int(value)
-            if unit.startswith("h"):
-                total += v * 3600
-            elif unit.startswith("m"):
-                total += v * 60
-            else:
-                total += v
-            found = True
-        return total if found else None
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

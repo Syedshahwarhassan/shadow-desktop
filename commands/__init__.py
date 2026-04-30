@@ -43,6 +43,16 @@ URDU_MAP = {
     "turn off":     "close",
     "بند کرو":       "close",
     "بند":          "close",
+    "khamosh":      "mute",
+    "chup":         "mute",
+    "gayab":        "hide",
+    "chhup":        "hide",
+    "dikhao":       "show",
+    "khamosh ho jao": "mute yourself",
+    "chup ho jao":   "mute yourself",
+    "gayab ho jao":  "hide yourself",
+    "chhup jao":     "hide yourself",
+    "samne ao":      "show yourself",
     # Volume
     "awaaz":        "volume",
     "awaaz barhaao":"volume up",
@@ -198,6 +208,38 @@ URDU_MAP = {
     "uske baad":  "then",
     "اور":         "and",
     "پھر":         "then",
+    # Time units for reminders
+    "minute":     "minute",
+    "minutes":    "minutes",
+    "ghante":     "hours",
+    "ghanta":     "hour",
+    "second":     "second",
+    "seconds":    "seconds",
+    "minat":      "minute",
+    "min":        "minute",
+    "منٹ":        "minute",
+    "منٹس":       "minutes",
+    "گھنٹہ":       "hour",
+    "گھنٹے":       "hours",
+    "سیکنڈ":       "second",
+    "mein":       "in",
+    "main":       "in",
+    "ان":         "in",
+    "ko":         "to",
+    "ٹو":         "to",
+    "aadha":      "30 minute",
+    "aadha ghanta":"30 minute",
+    "dedh ghanta":"90 minute",
+    "dhai ghante": "150 minute",
+    "sawa ghanta": "75 minute",
+    "paun ghanta": "45 minute",
+    "aadhe":      "half",
+    "aadha":      "half",
+    "آدھا":        "half",
+    "ڈیڑھ":        "1.5",
+    "ڈھائی":        "2.5",
+    "سوا":         "1.15",
+    "پونے":        "0.75",
 }
 
 # Pre-sort the Urdu map ONCE at module load (longest-key first) so the
@@ -404,6 +446,26 @@ class CommandDispatcher:
             m = re.search(r"(\d+)", text)
             if m:
                 return SystemCommands.set_volume(int(m.group(1)) - 50)
+
+        # ── Mute / Unmute Shadow ──────────────────────────────────────────────
+        if any(k in text for k in ["mute yourself", "mute shadow", "silent shadow", "stop talking"]):
+            from tts import tts_engine
+            tts_engine.set_muted(True)
+            return "Zaroor, main khamosh ho jati hoon. Jab bhi baat karni ho, 'unmute' kahein."
+
+        if any(k in text for k in ["unmute yourself", "unmute shadow", "speak shadow"]):
+            from tts import tts_engine
+            tts_engine.set_muted(False)
+            return "Theek hai, main ab bol sakti hoon."
+
+        # ── Hide / Show Shadow ────────────────────────────────────────────────
+        if any(k in text for k in ["hide yourself", "hide shadow", "hide it", "go away"]):
+            self.hud.hide_hud()
+            return "Theek hai, main chhup jati hoon. Aap mujhe hotkey se ya 'show shadow' keh kar wapas bula sakte hain."
+
+        if any(k in text for k in ["show yourself", "show shadow", "show it", "come back"]):
+            self.hud.show_hud()
+            return "Main wapas aa gayi hoon."
 
         # ── Brightness ────────────────────────────────────────────────────────
         if any(k in text for k in ["brightness", "roushni"]):
@@ -755,28 +817,70 @@ class CommandDispatcher:
             return PasswordCommands.generate(length)
 
         # ── Timer / alarm / reminder ──────────────────────────────────────────
-        if any(k in text for k in ["set timer", "start timer", "set alarm", "remind me", "yad dilana", "yad dilao"]):
+        if any(k in text for k in ["set timer", "start timer", "set alarm", "remind me", "reminder", "yad dilana", "yad dilao"]):
             secs = TimerCommands.parse_duration(text)
-            if secs:
-                # Capture label: everything between "remind me (to/that)" or "timer for" and the time/duration
-                # Remove common noise
-                lbl_text = text
-                for noise in ["set timer for", "set alarm for", "remind me to", "remind me that", "remind me", "yad dilana", "yad dilao"]:
-                    lbl_text = lbl_text.replace(noise, "")
-                
-                # Further clean: remove the time part from the label
-                # This is tricky without complex NLP, but we can remove digits and time units
-                label = re.sub(r"\d+\s*(hour|hr|minute|min|second|sec|pm|am|at|baje|o'clock)s?", "", lbl_text).strip()
-                label = re.sub(r"\bin\b|\bat\b", "", label).strip()
-                
-                if not label: label = "reminder"
-                
-                # The HUD/TTS callback fires on the timer thread
-                return TimerCommands.set_timer(secs, label, on_fire=lambda msg: self.hud.update_transcript(f"[TIMER] {msg}"))
-            return "Zaroor, lekin kitni der baad? (e.g. 'set timer for 5 minutes' ya 'remind me at 5pm')"
+            
+            # If duration is missing, but "remind" was said, enter a simple wizard mode
+            if not secs:
+                if any(k in text for k in ["remind me", "reminder", "yad dilao"]):
+                    return "Zaroor! Kis cheez ke baare mein aur kab yaad dilaun? (e.g. 'call mom in 5 minutes')"
+                return "Zaroor, lekin kitni der baad? (e.g. '5 minutes' ya 'at 10pm')"
 
-        if "list timers" in text or "active timers" in text or "show timers" in text:
+            # Label extraction
+            lbl_text = text
+            for noise in ["set timer for", "set timer", "start timer", "set alarm for", "set alarm", "set a reminder for", "set a reminder", "create a reminder",
+                         "remind me to", "remind me that", "remind me", "reminder for", "reminder", "yad dilana", "yad dilao"]:
+                lbl_text = lbl_text.replace(noise, "")
+            
+            time_units = r"\d+\s*(hour|hr|minute|min|second|sec|pm|am|at|baje|o'clock)s?"
+            label = re.sub(time_units, "", lbl_text).strip()
+            # Clean up grammar noise
+            label = re.sub(r"\bin\b|\bat\b|\bfor\b|\bto\b", "", label).strip()
+            
+            if not label: label = "reminder"
+            
+            def _on_timer_fire(msg):
+                if hasattr(self.hud, "reminder_signal"):
+                    self.hud.reminder_signal.emit(label)
+                tts_engine.speak(f"[EXCITED] {msg}")
+                
+            return TimerCommands.set_timer(secs, label, on_fire=_on_timer_fire)
+                
+        if "list timers" in text or "active timers" in text or "show timers" in text or "tasks batao" in text:
             return TimerCommands.list_active()
+
+        if any(k in text for k in ["cancel reminder", "delete reminder", "remove reminder", "stop alarm", "delete alarm"]):
+            # Try to extract index or name
+            m = re.search(r"(\d+)", text)
+            target = m.group(1) if m else text.replace("cancel reminder", "").replace("delete reminder", "").strip()
+            # If target is empty, ask which one
+            if not target:
+                return "Kaun sa reminder cancel karun? (Aap number ya naam bata sakte hain)"
+            
+            # Simple wrapper to handle indices
+            try:
+                idx = int(target) - 1
+                timers = [t for t in TimerCommands._timers if t["fires_at"] > datetime.now()]
+                if 0 <= idx < len(timers):
+                    label = timers[idx]["label"]
+                    timers[idx]["timer"].cancel()
+                    TimerCommands._timers.remove(timers[idx])
+                    TimerCommands._save_reminders()
+                    self.hud.refresh_reminders()
+                    return f"Theek hai, '{label}' reminder cancel kar diya hai."
+            except:
+                pass
+                
+            # Try by name
+            for t in TimerCommands._timers:
+                if t["label"].lower() in target.lower() or target.lower() in t["label"].lower():
+                    t["timer"].cancel()
+                    TimerCommands._timers.remove(t)
+                    TimerCommands._save_reminders()
+                    self.hud.refresh_reminders()
+                    return f"Theek hai, '{t['label']}' reminder cancel kar diya hai."
+            
+            return f"Mujhe '{target}' naam ka koi active reminder nahi mila."
 
         # ── Coin / dice / fact ───────────────────────────────────────────────
         if "flip" in text and "coin" in text:

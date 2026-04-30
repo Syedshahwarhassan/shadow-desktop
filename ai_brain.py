@@ -17,9 +17,12 @@ class AIBrain:
     def __init__(self):
         self.openrouter_key = config_manager.get("api_keys.openrouter")
         self.openai_key     = config_manager.get("api_keys.openai")
-        self.client         = None
+        self.openrouter_client = None
+        self.openai_client     = None
         self.is_legacy      = False
         self.default_model  = "openai/gpt-4o-mini"
+        self.client         = None
+        self.model          = self.default_model
 
         # True LRU cache
         self._cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
@@ -37,26 +40,27 @@ class AIBrain:
         try:
             from openai import OpenAI
             if self.openrouter_key:
-                self.client = OpenAI(
+                self.openrouter_client = OpenAI(
                     base_url="https://openrouter.ai/api/v1",
                     api_key=self.openrouter_key,
                     timeout=_AI_TIMEOUT,
                 )
-                self.model = self.default_model
-                print(f"[AI] OpenRouter ready — {self.model}")
-            elif self.openai_key:
-                self.client = OpenAI(api_key=self.openai_key, timeout=_AI_TIMEOUT)
-                self.model = "gpt-4o-mini"
-                print(f"[AI] OpenAI ready — {self.model}")
+                print(f"[AI] OpenRouter client ready.")
+            
+            if self.openai_key:
+                self.openai_client = OpenAI(api_key=self.openai_key, timeout=_AI_TIMEOUT)
+                print(f"[AI] OpenAI client ready.")
+            
+            self.client = self.openrouter_client or self.openai_client
+                
         except ImportError:
             self.is_legacy = True
             if self.openrouter_key:
                 openai.api_key  = self.openrouter_key
                 openai.api_base = "https://openrouter.ai/api/v1"
-                self.model      = self.default_model
             elif self.openai_key:
                 openai.api_key = self.openai_key
-                self.model     = "gpt-4o-mini"
+
 
     def _get_system_msg(self) -> str:
         notes    = memory_manager.get_notes_string()
@@ -95,6 +99,7 @@ class AIBrain:
     def get_response(self, prompt: str, stream: bool = False):
         if not self.openrouter_key and not self.openai_key:
             return "Please configure your OpenRouter or OpenAI API key in config.json."
+        
         cache_key = (prompt or "").strip().lower()
         if cache_key == self._last_prompt:
             cached = self._cache_get(cache_key)
@@ -103,42 +108,74 @@ class AIBrain:
         cached = self._cache_get(cache_key)
         if cached: return cached
 
-        try:
-            system_msg = self._get_system_msg()
-            messages   = [{"role": "system", "content": system_msg}]
-            messages.extend(self._history)
-            messages.append({"role": "user", "content": prompt})
+        system_msg = self._get_system_msg()
+        messages   = [{"role": "system", "content": system_msg}]
+        messages.extend(self._history)
+        messages.append({"role": "user", "content": prompt})
 
-            if not self.is_legacy and self.client:
-                resp = self.client.chat.completions.create(
-                    model=self.model,
+        # 1. Try OpenRouter (Primary)
+        if self.openrouter_client and not self.is_legacy:
+            try:
+                resp = self.openrouter_client.chat.completions.create(
+                    model=self.default_model,
                     messages=messages,
                     max_tokens=_AI_MAX_TOKENS,
                     timeout=_AI_TIMEOUT,
                     stream=stream,
                 )
                 if not stream:
-                    text = resp.choices[0].message.content.strip()
-                    return self._process_response(text, cache_key, prompt)
-                else:
-                    return self._stream_generator(resp, cache_key, prompt)
-            else:
+                    return self._process_response(resp.choices[0].message.content.strip(), cache_key, prompt)
+                return self._stream_generator(resp, cache_key, prompt)
+            except Exception as e:
+                print(f"[AI] OpenRouter failed: {e} — trying OpenAI fallback")
+
+        # 2. Try OpenAI (Secondary Fallback)
+        if self.openai_client and not self.is_legacy:
+            try:
+                resp = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    max_tokens=_AI_MAX_TOKENS,
+                    timeout=_AI_TIMEOUT,
+                    stream=stream,
+                )
+                if not stream:
+                    return self._process_response(resp.choices[0].message.content.strip(), cache_key, prompt)
+                return self._stream_generator(resp, cache_key, prompt)
+            except Exception as e:
+                print(f"[AI] OpenAI failed: {e} — trying Wikipedia fallback")
+
+        # 3. Legacy Fallback (OpenAI SDK v0.x)
+        if self.is_legacy:
+            try:
                 headers = {"HTTP-Referer": "https://github.com/Antigravity-AI", "X-Title": "Shadow Assistant"}
+                # Use whatever key was set globally
                 resp = openai.ChatCompletion.create(
-                    model=self.model,
+                    model=self.default_model if self.openrouter_key else "gpt-4o-mini",
                     messages=messages,
                     max_tokens=_AI_MAX_TOKENS,
                     request_timeout=_AI_TIMEOUT,
-                    headers=headers
+                    headers=headers if self.openrouter_key else None
                 )
-                text = resp.choices[0].message.content.strip()
-                return self._process_response(text, cache_key, prompt)
+                return self._process_response(resp.choices[0].message.content.strip(), cache_key, prompt)
+            except Exception as e:
+                print(f"[AI] Legacy OpenAI failed: {e}")
+
+        # 4. Wikipedia Fallback (if internet exists but API keys are dead)
+        try:
+            from commands.extra_cmds import WikipediaCommands
+            # Clean prompt for Wikipedia (remove conversational fluff)
+            clean_q = re.sub(r"^(shadow|tell me|who is|what is|can you|batao|kya hai)\s+", "", prompt, flags=re.IGNORECASE).strip("? ")
+            wiki_summary = WikipediaCommands.summary(clean_q, sentences=2)
+            if "lookup failed" not in wiki_summary and "couldn't find" not in wiki_summary:
+                return f"[CALM] Wikipedia se mujhe yeh maloom hua hai: {wiki_summary}"
         except Exception as e:
-            error_str = str(e)
-            print(f"[AI] Error: {error_str}")
-            if "User not found" in error_str:
-                return "[CALM] Maaf kijiye, aapka OpenRouter API key invalid hai ya expire ho chuka hai. Please config.json mein naya key check karein."
-            return memory_manager.get_offline_response(prompt)
+            print(f"[AI] Wikipedia fallback failed: {e}")
+
+        # 5. Offline Memory Fallback (Last Resort)
+        print("[AI] All online engines failed — using offline memory")
+        return memory_manager.get_offline_response(prompt)
+
 
     def _process_response(self, text: str, cache_key: str, user_prompt: str) -> str:
         m = re.search(r"\[SAVE_MEMORY:\s*(.+?)\]", text, re.IGNORECASE)
@@ -171,7 +208,7 @@ class AIBrain:
         if not self.openrouter_key and not self.openai_key: return None
         sys_msg = "You are an expert software developer. Return ONLY code in markdown code blocks."
         try:
-            if not self.is_legacy and self.client:
+            if self.client and not self.is_legacy:
                 r = self.client.chat.completions.create(
                     model=self.model,
                     messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
@@ -179,8 +216,9 @@ class AIBrain:
                 )
                 return r.choices[0].message.content.strip()
             else:
+                # Legacy fallback
                 r = openai.ChatCompletion.create(
-                    model=self.model,
+                    model=self.model if self.openrouter_key else "gpt-4o-mini",
                     messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
                     max_tokens=4000,
                 )
@@ -191,23 +229,23 @@ class AIBrain:
 
     def analyze_image(self, image_path: str, prompt: str = "Describe what you see.") -> str:
         if not self.openrouter_key and not self.openai_key: return "API key required."
+        if not self.client: return "Vision analysis requires a modern SDK."
         try:
             with open(image_path, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
-            if not self.is_legacy and self.client:
-                r = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "You are a vision AI. Answer in Urdu."},
-                        {"role": "user", "content": [
-                            {"type": "text",      "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                        ]},
-                    ],
-                    max_tokens=500,
-                )
-                return r.choices[0].message.content.strip()
-            return "Vision analysis requires a modern SDK."
+            
+            r = self.client.chat.completions.create(
+                model=self.model if self.openrouter_client else "gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a vision AI. Answer in Urdu."},
+                    {"role": "user", "content": [
+                        {"type": "text",      "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    ]},
+                ],
+                max_tokens=500,
+            )
+            return r.choices[0].message.content.strip()
         except Exception as e:
             print(f"[AI] Vision error: {e}")
             return f"I couldn't analyze the screen: {e}"

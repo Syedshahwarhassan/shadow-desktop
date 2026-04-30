@@ -4,8 +4,9 @@ hud.py — Futuristic AR HUD for Shadow Assistant.
 
 import sys
 import time
-import time
 import ctypes
+import winsound
+import threading
 from PyQt6.QtWidgets import (
     QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, 
     QLabel, QListWidget, QFrame, QMenu, QApplication,
@@ -13,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QRect, QPoint, QPointF, QPropertyAnimation, 
-    QEasingCurve, pyqtProperty, QSize, QDateTime
+    QEasingCurve, pyqtProperty, QSize, QDateTime, pyqtSignal
 )
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QFont, QBrush, 
@@ -261,6 +262,8 @@ class FaceWidget(QWidget):
         p.drawEllipse(QPointF(ex, ey), 2.0, 2.0)
 
 class ShadowHUD(QWidget):
+    reminder_signal = pyqtSignal(str) # For thread-safe alarms
+    
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -271,6 +274,7 @@ class ShadowHUD(QWidget):
             Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
         # Windows-specific: WS_EX_NOACTIVATE to prevent focus stealing
@@ -321,6 +325,14 @@ class ShadowHUD(QWidget):
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
         self.clock_timer.start(1000)
+
+        # Reminder refresh timer (every 10 seconds is enough)
+        self.rem_timer = QTimer(self)
+        self.rem_timer.timeout.connect(self.refresh_reminders)
+        self.rem_timer.start(10000)
+        
+        # Connect reminder signal for thread-safety
+        self.reminder_signal.connect(self.trigger_alarm)
 
     def restore_position(self):
         x = self.config.get("hud_x", -1)
@@ -429,9 +441,33 @@ class ShadowHUD(QWidget):
         trans_v.addWidget(self.transcript_lbl)
 
         self.main_layout.addWidget(trans_panel)
+
+        # ── Row 3: Reminders List (NEW) ────────────────────────────────
+        self.rem_panel = HUDPanel()
+        rem_v = QVBoxLayout(self.rem_panel)
+        rem_v.setContentsMargins(8, 4, 8, 4)
+        rem_v.setSpacing(2)
+        
+        rem_header = QHBoxLayout()
+        rem_header.addWidget(HUDLabel("UPCOMING TASKS", color="#BA7517"))
+        rem_header.addStretch()
+        rem_v.addLayout(rem_header)
+        
+        self.reminders_container = QVBoxLayout()
+        self.reminders_container.setSpacing(2)
+        rem_v.addLayout(self.reminders_container)
+        
+        self.no_rem_lbl = QLabel("No active tasks.")
+        self.no_rem_lbl.setFont(QFont("Consolas", 8))
+        self.no_rem_lbl.setStyleSheet("color: #4a5568; font-style: italic;")
+        self.reminders_container.addWidget(self.no_rem_lbl)
+        
+        self.main_layout.addWidget(self.rem_panel)
+
         self.main_layout.setStretch(0, 0)  # top bar fixed
         self.main_layout.setStretch(1, 0)  # face fixed
-        self.main_layout.setStretch(2, 1)  # transcript expands
+        self.main_layout.setStretch(2, 2)  # transcript expands
+        self.main_layout.setStretch(3, 1)  # reminders fixed/small
 
     def add_status_indicator(self, key, value, state):
         return QLabel()
@@ -504,6 +540,73 @@ class ShadowHUD(QWidget):
                 "background: rgba(255,255,255,5);"
                 "border: 1px solid rgba(255,255,255,10);"
             )
+
+    def trigger_alarm(self, label: str):
+        """Visual and audible alert for a firing reminder."""
+        self.show_hud() # Ensure it's visible
+        self.update_transcript(f"<span style='color:#FF4B4B;'><b>[ALARM]</b></span> {label}")
+        self.set_emotion("EXCITED")
+        
+        # Play beep sound 3 times in background
+        def _beep():
+            try:
+                for _ in range(3):
+                    winsound.Beep(1000, 400) # 1000Hz, 400ms
+                    time.sleep(0.2)
+            except: pass
+        threading.Thread(target=_beep, daemon=True).start()
+
+        # Flash the background
+        self.flash_anim = QPropertyAnimation(self, b"windowOpacity")
+        self.flash_anim.setDuration(300)
+        self.flash_anim.setStartValue(self.windowOpacity())
+        self.flash_anim.setEndValue(1.0)
+        self.flash_anim.setKeyValueAt(0.5, 0.5)
+        self.flash_anim.setEndValue(self.config.get("hud_opacity", 0.92))
+        self.flash_anim.start()
+        # Force a refresh
+        self.refresh_reminders()
+
+    def refresh_reminders(self):
+        """Update the reminders list from TimerCommands."""
+        try:
+            from commands.extra_cmds import TimerCommands
+            reminders = TimerCommands.get_active_data()
+            
+            # Clear old dynamic widgets
+            while self.reminders_container.count():
+                child = self.reminders_container.takeAt(0)
+                widget = child.widget()
+                if widget and widget != self.no_rem_lbl:
+                    widget.deleteLater()
+            
+            if not reminders:
+                if self.no_rem_lbl.parent() is None:
+                    self.reminders_container.addWidget(self.no_rem_lbl)
+                self.no_rem_lbl.show()
+                return
+            
+            self.no_rem_lbl.hide()
+            for r in reminders[:3]: # Show top 3
+                row = QWidget()
+                row_l = QHBoxLayout(row)
+                row_l.setContentsMargins(0, 0, 0, 0)
+                
+                lbl = QLabel(f"• {r['label'][:20]}")
+                lbl.setFont(QFont("Consolas", 9))
+                lbl.setStyleSheet("color: #e2e8f0;")
+                
+                time_lbl = QLabel(r['time'])
+                time_lbl.setFont(QFont("Consolas", 8))
+                time_lbl.setStyleSheet("color: #BA7517;")
+                time_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+                
+                row_l.addWidget(lbl)
+                row_l.addStretch()
+                row_l.addWidget(time_lbl)
+                self.reminders_container.addWidget(row)
+        except Exception as e:
+            print(f"[HUD] Refresh rem error: {e}")
 
     # --- Timers & Stats ---
 
