@@ -24,8 +24,8 @@ class SystemCommands:
         except Exception:
             disk = 0
         info = f"CPU {cpu}%, RAM {ram}%, Disk {disk}%"
-        print(f"[CMD] System Info → {info}")
-        return f"System Status: CPU {cpu} percent, RAM {ram} percent, Disk {disk} percent."
+        print(f"[CMD] System Info -> {info}")
+        return f"سسٹم کی حالت: سی پی یو {cpu} فیصد، ریم {ram} فیصد، اور ڈسک {disk} فیصد استعمال ہو رہی ہے۔"
 
     @staticmethod
     def set_volume(change):
@@ -37,10 +37,10 @@ class SystemCommands:
                 ctypes.windll.user32.keybd_event(key, 0, 2, 0)  # key up
             direction = "up" if change > 0 else "down"
             print(f"[CMD] Volume {direction} by {steps} steps")
-            return f"Volume {'increased' if change > 0 else 'decreased'}."
+            return f"آواز {'بڑھا' if change > 0 else 'کم'} کر دی گئی ہے۔"
         except Exception as e:
             print(f"[ERR] Volume: {e}")
-            return "Could not adjust volume."
+            return "معذرت، آواز تبدیل نہیں ہو سکی۔"
 
     @staticmethod
     def set_brightness(level):
@@ -49,8 +49,8 @@ class SystemCommands:
         try:
             from screen_brightness_control import set_brightness as _set
             _set(level)
-            print(f"[CMD] Brightness → {level}% (sbc)")
-            return f"Brightness set to {level} percent."
+            print(f"[CMD] Brightness -> {level}% (sbc)")
+            return f"برائٹنس {level} فیصد کر دی گئی ہے۔"
         except Exception:
             pass
         # Fallback: PowerShell WMI brightness command
@@ -65,29 +65,29 @@ class SystemCommands:
                 timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            print(f"[CMD] Brightness → {level}% (powershell)")
-            return f"Brightness set to {level} percent."
+            print(f"[CMD] Brightness -> {level}% (powershell)")
+            return f"برائٹنس {level} فیصد کر دی گئی ہے۔"
         except Exception as e:
             print(f"[ERR] Brightness: {e}")
-            return "Could not set brightness on this display."
+            return "معذرت، برائٹنس تبدیل نہیں ہو سکی۔"
 
     @staticmethod
     def lock_screen():
         print("[CMD] Locking screen...")
         ctypes.windll.user32.LockWorkStation()
-        return "Screen locked."
+        return "سکرین لاک کر دی گئی ہے۔"
 
     @staticmethod
     def shutdown(timer=30):
         print(f"[CMD] Shutdown in {timer}s")
         subprocess.Popen(["shutdown", "/s", "/t", str(timer)])
-        return f"Shutting down in {timer} seconds."
+        return f"سسٹم {timer} سیکنڈ میں بند ہو جائے گا۔"
 
     @staticmethod
     def restart(timer=30):
         print(f"[CMD] Restart in {timer}s")
         subprocess.Popen(["shutdown", "/r", "/t", str(timer)])
-        return f"Restarting in {timer} seconds."
+        return f"سسٹم {timer} سیکنڈ میں دوبارہ شروع ہو جائے گا۔"
 
     @staticmethod
     def restart_self():
@@ -171,7 +171,7 @@ class SystemCommands:
             if key in app_name:
                 print(f"[CMD] Opening web: {url}")
                 webbrowser.open(url)
-                return f"Opening {key} in your browser."
+                return f"براؤزر میں {key} کھول رہا ہوں۔"
 
         # Check local apps
         for key, exe in local_apps.items():
@@ -182,7 +182,7 @@ class SystemCommands:
                         subprocess.Popen(["start", exe], shell=True)
                     else:
                         subprocess.Popen(exe, creationflags=subprocess.CREATE_NO_WINDOW)
-                    return f"Opening {key}."
+                    return f"{key} کھول رہا ہوں۔"
                 except Exception as e:
                     print(f"[ERR] Local app: {e}")
 
@@ -193,7 +193,7 @@ class SystemCommands:
                 try:
                     subprocess.Popen(f"start {cmd}", shell=True, 
                                     creationflags=subprocess.CREATE_NO_WINDOW)
-                    return f"Opening {key}."
+                    return f"{key} کھول رہا ہوں۔"
                 except Exception as e:
                     print(f"[ERR] Start app: {e}")
 
@@ -201,16 +201,16 @@ class SystemCommands:
         print(f"[CMD] Fallback: trying raw launch for '{app_name}'")
         try:
             subprocess.Popen(app_name, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            return f"Attempting to open {app_name}."
+            return f"{app_name} کھولنے کی کوشش کر رہا ہوں۔"
         except:
-            return f"I couldn't find or open '{app_name}'. Please add it to my app list."
+            return f"معذرت، مجھے '{app_name}' نہیں ملا۔"
 
     @staticmethod
     def open_file_explorer(path=None):
         target = path or "C:\\"
         print(f"[CMD] Opening File Explorer: {target}")
         subprocess.Popen(f"explorer {target}", shell=True)
-        return f"Opening File Explorer."
+        return "فائل ایکسپلورر کھول رہا ہوں۔"
 
     @staticmethod
     def search_and_open_folder(folder_name):
@@ -228,9 +228,9 @@ class SystemCommands:
                 if os.path.exists(first_match):
                     print(f"[CMD] Found: {first_match}")
                     subprocess.Popen(f'explorer "{first_match}"', shell=True)
-                    return f"Opening folder {os.path.basename(first_match)}."
+                    return f"{os.path.basename(first_match)} کا فولڈر کھول رہا ہوں۔"
             
-            return f"I couldn't find a folder named {folder_name} in your D drive."
+            return f"معذرت، مجھے ڈی ڈرائیو میں '{folder_name}' کے نام کا کوئی فولڈر نہیں ملا۔"
         except Exception as e:
             print(f"[ERR] Search folder: {e}")
-            return "An error occurred while searching for the folder."
+            return "معذرت، فولڈر تلاش کرنے میں کچھ غلطی ہوئی ہے۔"

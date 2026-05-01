@@ -476,6 +476,9 @@ class ShadowHUD(QWidget):
 
     def update_transcript(self, text: str):
         import re
+        # Strip all bracket tags like [ACTION], [HAPPY], etc.
+        text = re.sub(r"\[[A-Z_]+\]\s*", "", text, flags=re.IGNORECASE).strip()
+        
         highlighted = re.sub(
             r"(shadow)",
             r'<span style="color:#e2e8f0;"><b>\1</b></span>',

@@ -230,14 +230,19 @@ class Listener:
         if not done.is_set() and self.vosk_model:
             try:
                 print("[STT] Google failed or timed out — trying Vosk offline...")
-                results["en"] = self.recognizer.recognize_vosk(audio).lower()
-                # Vosk returns a JSON string like {"text": "..."}
-                import json
-                try:
-                    res_json = json.loads(results["en"])
-                    results["en"] = res_json.get("text", "")
-                except Exception:
-                    pass
+                import vosk as _vosk
+                import json as _json
+                
+                # Manual Vosk recognition bypasses speech_recognition's broken wrapper
+                rec = _vosk.KaldiRecognizer(self.vosk_model, 16000)
+                # Convert audio to 16kHz mono (standard for Vosk models)
+                raw_data = audio.get_raw_data(convert_rate=16000, convert_width=2)
+                if rec.AcceptWaveform(raw_data):
+                    raw_vosk = rec.Result()
+                else:
+                    raw_vosk = rec.FinalResult()
+                
+                results["en"] = _json.loads(raw_vosk).get("text", "").lower()
                 if results["en"]:
                     done.set()
             except Exception as e:

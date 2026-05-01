@@ -41,16 +41,27 @@ from tray import TrayIcon
 from settings_ui import SettingsWindow
 from performance_logger import timeit
 
-# Pre-compiled emotion patterns (module-level, not per-call)
-_EMOTION_TAGS  = frozenset(["HAPPY", "SAD", "EXCITED", "ANGRY", "CURIOUS", "CALM"])
-_TAG_RE        = re.compile(r"^\[(" + "|".join(_EMOTION_TAGS) + r")\]\s*", re.IGNORECASE)
-_STRIP_TAGS_RE = re.compile(r"\[(?:" + "|".join(_EMOTION_TAGS) + r")\]", re.IGNORECASE)
+# Pre-compiled tag patterns for display stripping and emotion extraction
+_EMOTION_ONLY  = frozenset(["HAPPY", "SAD", "EXCITED", "ANGRY", "CURIOUS", "CALM"])
+_FUNC_TAGS     = frozenset(["ACTION", "INFO", "WARN", "REMIND"])
+_ALL_TAGS      = _EMOTION_ONLY | _FUNC_TAGS
+
+_TAG_RE        = re.compile(r"^\[(" + "|".join(_ALL_TAGS) + r")\]\s*", re.IGNORECASE)
+_STRIP_TAGS_RE = re.compile(r"\[(?:" + "|".join(_ALL_TAGS) + r")\]", re.IGNORECASE)
 
 def _extract_emotion(text: str) -> tuple[str, str]:
-    m = _TAG_RE.match(text)
-    if m:
-        return m.group(1).upper(), text[m.end():]
-    return "CALM", text
+    """Extract first emotion tag for HUD face, and strip ALL leading tags."""
+    emotion = "CALM"
+    emotion_found = False
+    while True:
+        m = _TAG_RE.match(text)
+        if not m: break
+        tag = m.group(1).upper()
+        if not emotion_found and tag in _EMOTION_ONLY:
+            emotion = tag
+            emotion_found = True
+        text = text[m.end():].strip()
+    return emotion, text
 
 class VoiceSignal(QObject):
     command_received    = pyqtSignal(str)
@@ -103,7 +114,7 @@ class AntiGravityApp:
             tts_engine.speak(f"[EXCITED] {msg}")
 
         TimerCommands.load_reminders(on_fire_callback=_global_reminder_callback)
-        tts_engine.speak("System online. All systems operational.")
+        tts_engine.speak("سسٹم آن لائن ہے۔ تمام سسٹم کام کر رہے ہیں۔")
         self.listener.start()
         
         hotkey      = config_manager.get("hotkey", "win+shift+s")
@@ -146,7 +157,7 @@ class AntiGravityApp:
         self.hud.show_hud()
         if text == "_WAKE_":
             self.hud.set_listening(True)
-            tts_engine.speak("Yes?")
+            tts_engine.speak("جی؟")
             return
         print(f"\n{'='*50}\n[COMMAND] '{text}'")
         self.hud.set_processing(True)

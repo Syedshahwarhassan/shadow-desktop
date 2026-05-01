@@ -26,17 +26,18 @@ from config_manager import config_manager
 
 # ── Emotion map ───────────────────────────────────────────────────────────────
 _EMOTION_MAP: dict[str, dict[str, str]] = {
-    "[HAPPY]":   {"pitch": "+5Hz", "rate": "+0%"},
-    "[EXCITED]": {"pitch": "+10Hz", "rate": "+5%"},
-    "[SAD]":     {"pitch": "-8Hz", "rate": "-15%"},
-    "[ANGRY]":   {"pitch": "-2Hz",  "rate": "+8%"},
-    "[CURIOUS]": {"pitch": "+4Hz", "rate": "-5%"},
-    "[CALM]":    {"pitch": "+0Hz",  "rate": "-10%"},
+    "[HAPPY]":   {"pitch": "+3Hz", "rate": "+5%"},
+    "[EXCITED]": {"pitch": "+8Hz", "rate": "+12%"},
+    "[SAD]":     {"pitch": "-5Hz", "rate": "-10%"},
+    "[ANGRY]":   {"pitch": "-2Hz", "rate": "+15%"},
+    "[CURIOUS]": {"pitch": "+5Hz", "rate": "+2%"},
+    "[CALM]":    {"pitch": "+0Hz", "rate": "+0%"},
 }
 
-# Pre-compile tag-stripping pattern once
+# Pre-compile tag-stripping pattern once (Emotion tags + Dispatcher tags)
 _TAG_PATTERN = re.compile(
-    r"^\s*(\[(?:HAPPY|EXCITED|SAD|ANGRY|CURIOUS|CALM)\])\s*", re.IGNORECASE
+    r"^\s*(\[(?:HAPPY|EXCITED|SAD|ANGRY|CURIOUS|CALM|ACTION|INFO|WARN|REMIND)\])\s*", 
+    re.IGNORECASE
 )
 
 # Heuristic patterns for tag-less text
@@ -45,22 +46,38 @@ _SADNESS_WORDS = frozenset(["افسوس", "سوری", "sad"])
 
 
 def _extract_emotion(text: str) -> tuple[dict[str, str], str]:
-    """Return (pitch/rate params, clean_text) — O(1) lookup."""
-    m = _TAG_PATTERN.match(text)
-    if m:
-        params = _EMOTION_MAP.get(m.group(1).upper(), {"pitch": "+0Hz", "rate": "-10%"})
-        return params, text[m.end():].strip()
+    """
+    Extracts the first emotion tag for voice modulation and strips ALL 
+    recognised tags from the beginning of the text.
+    """
+    params = {"pitch": "+0Hz", "rate": "-10%"}
+    emotion_found = False
+    
+    while True:
+        m = _TAG_PATTERN.match(text)
+        if not m:
+            break
+            
+        tag = m.group(1).upper()
+        # If this is an emotion tag and we haven't found one yet, use it for params
+        if not emotion_found and tag in _EMOTION_MAP:
+            params = _EMOTION_MAP[tag]
+            emotion_found = True
+            
+        # Strip the tag and continue looking for more
+        text = text[m.end():].strip()
 
-    # Heuristic fallback
-    pitch, rate = "+0Hz", "-10%"
-    lower = text.lower()
-    if "!" in text or any(w in lower for w in _EXCITE_WORDS):
-        pitch, rate = "+15Hz", "-5%"
-    elif "?" in text:
-        pitch = "+5Hz"
-    elif any(w in lower for w in _SADNESS_WORDS):
-        pitch, rate = "-15Hz", "-20%"
-    return {"pitch": pitch, "rate": rate}, text
+    # Heuristic fallback if no emotion tags were present
+    if not emotion_found:
+        lower = text.lower()
+        if "!" in text or any(w in lower for w in _EXCITE_WORDS):
+            params = {"pitch": "+8Hz", "rate": "+10%"}
+        elif "?" in text:
+            params = {"pitch": "+5Hz", "rate": "+2%"}
+        elif any(w in lower for w in _SADNESS_WORDS):
+            params = {"pitch": "-6Hz", "rate": "-12%"}
+            
+    return params, text
 
 
 # ── Single temp file — TTS worker is single-threaded, no race condition
@@ -201,10 +218,15 @@ class TTSEngine:
     def _synthesize_edge(self, text: str) -> bytes | None:
         params, clean = _extract_emotion(text)
         
+        # Detect language: if it contains Urdu characters, use the Urdu voice.
+        # Otherwise, use a premium, warm English voice (Christopher).
+        has_urdu = bool(re.search(r"[\u0600-\u06FF]", clean))
+        voice = "ur-PK-AsadNeural" if has_urdu else "en-US-ChristopherNeural"
+        
         async def _task():
             comm = edge_tts.Communicate(
                 text=clean,
-                voice="ur-PK-AsadNeural",
+                voice=voice,
                 rate=params["rate"],
                 pitch=params["pitch"],
             )
@@ -293,3 +315,8 @@ class TTSEngine:
 
 # Global singleton
 tts_engine = TTSEngine()
+
+
+def get_tts_engine() -> TTSEngine:
+    """Return the global TTS singleton (used by the NL dispatcher)."""
+    return tts_engine

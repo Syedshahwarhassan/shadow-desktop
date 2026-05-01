@@ -324,7 +324,7 @@ class TimerCommands:
                         missed.append(label)
             
             if missed:
-                msg = f"Aapke kuch reminders miss ho gaye hain: {', '.join(missed)}"
+                msg = f"آپ کے کچھ ریمائڈرز مِس ہو گئے ہیں: {', '.join(missed)}"
                 print(f"[TIMER] Missed: {msg}")
                 if callable(cls._on_fire_callback):
                     # Delay slightly to let system stabilize
@@ -345,7 +345,7 @@ class TimerCommands:
             print(f"[TIMER] '{label}' fired at {datetime.now().strftime('%H:%M:%S')}")
             if callable(on_fire):
                 try:
-                    on_fire(f"Time's up for {label}.")
+                    on_fire(f"{label} کا وقت ختم ہو گیا ہے۔")
                 except Exception as e:
                     print(f"[TIMER] callback error: {e}")
             # Remove from active list after firing
@@ -360,18 +360,18 @@ class TimerCommands:
         if save:
             cls._save_reminders()
             
-        return f"Theek hai, main aapko {label} ke baare mein yaad dila dungi. ({fires_at.strftime('%I:%M %p')})"
+        return f"ٹھیک ہے، میں آپ کو {label} کے بارے میں یاد دِلا دوں گا۔ ({fires_at.strftime('%I:%M %p')})"
 
     @classmethod
     def list_active(cls) -> str:
         active = [t for t in cls._timers if t["fires_at"] > datetime.now()]
         if not active:
-            return "Abhi koi active reminders nahi hain."
+            return "ابھی کوئی ایکٹیو ریمائڈرز نہیں ہیں۔"
         lines = [
             f"  - {t['label']} → {t['fires_at'].strftime('%I:%M %p')}"
             for t in sorted(active, key=lambda x: x["fires_at"])
         ]
-        return "Active reminders:\n" + "\n".join(lines)
+        return "ایکٹیو ریمائڈرز:\n" + "\n".join(lines)
 
     @classmethod
     def get_active_data(cls):
